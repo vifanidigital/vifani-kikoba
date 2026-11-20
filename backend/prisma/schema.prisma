@@ -1,0 +1,227 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  fullName     String
+  phone        String        @unique
+  pinHash      String
+  deviceId     String?
+  isVerified   Boolean       @default(false)
+  otpCode      String?
+  otpExpiresAt DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  memberships         GroupMember[]
+  shareRecords        ShareRecord[]
+  papoAccounts        PapoAccount[]
+  papoTopUps          PapoTopUp[]
+  loans               Loan[]
+  guaranteedLoans     Loan[]              @relation("LoanGuarantor")
+  fines               FineRecord[]
+  transactions        Transaction[]
+  terminationRequests MemberTermination[] @relation("TerminationTarget")
+  terminationVotes    TerminationVote[]
+}
+
+model Group {
+  id                  String   @id @default(uuid())
+  name                String
+  groupType           String   @default("KIKOBA")
+  announcement        String?
+  meetingDayOfWeek    Int      @default(4)
+  meetingTime         String   @default("16:00")
+  meetingVenue        String?
+  cycleMonths         Int      @default(12)
+  shareValue          Float    @default(5000)
+  minSharesPerMeeting Int      @default(1)
+  maxSharesPerMeeting Int      @default(10)
+  contributionFreq    String   @default("WEEKLY")
+  socialFundAmount    Float    @default(0)
+  socialFundMin       Float    @default(0)
+  socialFundMax       Float    @default(0)
+
+  hasPapo             Boolean  @default(false)
+  mandatoryPapoAmount Float    @default(0)
+  papoMeetingInterest Float    @default(10)
+  allowTopUpPapo      Boolean  @default(false)
+  minTopUpPapoCap     Float    @default(0)
+  maxTopUpPapoCap     Float    @default(0)
+  topUpPapoWeeks      Int      @default(4)
+  topUpPapoInterest   Float    @default(0)
+
+  interestRate        Float    @default(10)
+  loanLimitMultiplier Int      @default(3)
+  maxBigLoanCap       Float    @default(0)
+  maxRepaymentMonths  Int      @default(3)
+  requireGuarantor    Boolean  @default(true)
+
+  latePenalty             Float @default(0)
+  absentPenalty           Float @default(0)
+  noSharePenalty          Float @default(0)
+  noSocialFundPenalty     Float @default(0)
+  noPapoInterestPenalty   Float @default(0)
+  lateTopUpPenalty        Float @default(0)
+  lateLoanInterestPenalty Float @default(0)
+  disciplinePenalty       Float @default(0)
+  otherPenalty            Float @default(0)
+
+  subscriptionStatus String   @default("TRIAL")
+  trialEndsAt        DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  members      GroupMember[]
+  shareRecords ShareRecord[]
+  papoAccounts PapoAccount[]
+  papoTopUps   PapoTopUp[]
+  loans        Loan[]
+  fines        FineRecord[]
+  transactions Transaction[]
+  terminations MemberTermination[]
+}
+
+model GroupMember {
+  id                   String   @id @default(uuid())
+  groupId              String
+  group                Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role                 String   @default("MEMBER")
+  isActive             Boolean  @default(true)
+  memberInterestProfit Float    @default(0)
+  joinedAt             DateTime @default(now())
+
+  @@unique([groupId, userId])
+  @@unique([userId, groupId])
+}
+
+model MemberTermination {
+  id           String            @id @default(uuid())
+  groupId      String
+  group        Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  targetUserId String
+  targetUser   User              @relation("TerminationTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  reason       String
+  status       String            @default("VOTING")
+  createdAt    DateTime          @default(now())
+  votes        TerminationVote[]
+}
+
+model TerminationVote {
+  id            String            @id @default(uuid())
+  terminationId String
+  termination   MemberTermination @relation(fields: [terminationId], references: [id], onDelete: Cascade)
+  voterUserId   String
+  voter         User              @relation(fields: [voterUserId], references: [id], onDelete: Cascade)
+  approveRemove Boolean           @default(true)
+  votedAt       DateTime          @default(now())
+
+  @@unique([terminationId, voterUserId])
+}
+
+model ShareRecord {
+  id             String   @id @default(uuid())
+  groupId        String
+  group          Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sharesCount    Int
+  amountPaid     Float
+  socialFundPaid Float    @default(0)
+  meetingDate    DateTime @default(now())
+  createdAt      DateTime @default(now())
+}
+
+model PapoAccount {
+  id               String   @id @default(uuid())
+  groupId          String
+  group            Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mandatoryBalance Float    @default(0)
+  updatedAt        DateTime @updatedAt
+
+  @@unique([userId, groupId])
+}
+
+model PapoTopUp {
+  id              String    @id @default(uuid())
+  groupId         String
+  group           Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  principalAmount Float
+  interestRate    Float     @default(10)
+  totalPayable    Float
+  amountPaid      Float     @default(0)
+  dueDate         DateTime?
+  status          String    @default("PENDING")
+  createdAt       DateTime  @default(now())
+}
+
+model Loan {
+  id              String         @id @default(uuid())
+  groupId         String
+  group           Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  principalAmount Float
+  interestRate    Float          @default(10)
+  repaymentMonths Int            @default(1)
+  totalRepayable  Float
+  amountPaid      Float          @default(0)
+  dueDate         DateTime?
+  nextInterestDue DateTime?
+  guarantorId     String?
+  guarantor       User?          @relation("LoanGuarantor", fields: [guarantorId], references: [id])
+  guarantorStatus String         @default("PENDING")
+  status          String         @default("PENDING")
+  disbursedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  approvals       LoanApproval[]
+}
+
+model LoanApproval {
+  id         String   @id @default(uuid())
+  loanId     String
+  loan       Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  leaderId   String
+  role       String
+  approvedAt DateTime @default(now())
+
+  @@unique([loanId, leaderId])
+}
+
+model FineRecord {
+  id        String    @id @default(uuid())
+  groupId   String
+  group     Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  String    @default("OTHER")
+  reason    String
+  amount    Float
+  isPaid    Boolean   @default(false)
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Transaction {
+  id        String   @id @default(uuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  amount    Float
+  notes     String?
+  createdAt DateTime @default(now())
+}
