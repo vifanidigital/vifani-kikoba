@@ -6,145 +6,152 @@ const router = Router();
 const prisma = new PrismaClient();
 const LEADER_ROLES = ['CHAIRPERSON', 'SECRETARY', 'TREASURER'];
 
-export function alignToNextMeetingDay(targetDate: Date, meetingDayOfWeek: number): Date {
-  const result = new Date(targetDate);
-  result.setHours(0, 0, 0, 0);
-  const currentDay = result.getDay();
-  const diff = (meetingDayOfWeek - currentDay + 7) % 7;
-  result.setDate(result.getDate() + diff);
-  return result;
-}
-
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const { userId, groupId } = req.user!;
-    const group = await prisma.group.findUnique({ where: { id: groupId } });
-    if (!group) return res.status(404).json({ error: 'Kikoba hakijapatikana.' });
 
-    const myShares = await prisma.shareRecord.aggregate({
-      where: { userId, groupId },
-      _sum: { amountPaid: true },
-    });
-    const shareValueTotal = myShares._sum.amountPaid || 0;
-    const calculatedByShares = shareValueTotal * group.loanLimitMultiplier;
-    const effectiveMaxLoan =
-      group.maxBigLoanCap > 0
-        ? Math.min(calculatedByShares, group.maxBigLoanCap)
-        : calculatedByShares;
+    const [group, member, myShares, loans, membersList] = await Promise.all([
+      prisma.group.findUnique({ where: { id: groupId } }),
+      prisma.groupMember.findUnique({ where: { userId_groupId: { userId, groupId } } }),
+      prisma.shareRecord.aggregate({ where: { groupId, userId }, _sum: { amountPaid: true } }),
+      prisma.loan.findMany({
+        where: { groupId },
+        include: {
+          user: { select: { id: true, fullName: true, phone: true } },
+          guarantor: { select: { id: true, fullName: true, phone: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.groupMember.findMany({
+        where: { groupId, isActive: true, userId: { not: userId } },
+        include: { user: { select: { id: true, fullName: true, phone: true } } },
+      }),
+    ]);
 
-    const loans = await prisma.loan.findMany({
-      where: { groupId },
-      include: {
-        user: { select: { id: true, fullName: true, phone: true } },
-        guarantor: { select: { id: true, fullName: true, phone: true } },
-        approvals: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    if (!group || !member) return res.status(404).json({ error: 'Taarifa hazijapatikana.' });
+
+    const mySharesVal = myShares._sum.amountPaid || 0;
+    const multiplier = group.loanLimitMultiplier || 3;
+    const activeDebt = loans
+      .filter((l: any) => l.userId === userId && ['PENDING', 'DISBURSED', 'OVERDUE', 'REPAYMENT_PENDING'].includes(l.status))
+      .reduce((s: number, l: any) => s + Math.max(0, l.totalRepayable - l.amountPaid), 0);
+
+    let rawMax = mySharesVal * multiplier;
+    if (group.maxBigLoanCap && group.maxBigLoanCap > 0) {
+      rawMax = Math.min(rawMax, group.maxBigLoanCap);
+    }
+    const effectiveMaxLoan = Math.max(0, rawMax - activeDebt);
 
     const guarantorRequests = loans.filter(
-      (l) => l.guarantorId === userId && l.guarantorStatus === 'PENDING'
+      (l: any) => l.guarantorId === userId && l.guarantorStatus === 'PENDING' && l.status === 'PENDING'
     );
 
-    const memberships = await prisma.groupMember.findMany({
-      where: { groupId, isActive: true, userId: { not: userId } },
-      include: { user: { select: { id: true, fullName: true, phone: true } } },
-    });
-    const potentialGuarantors = memberships.map((m) => m.user);
-
-    const myProfitAgg = await prisma.transaction.aggregate({
-      where: { groupId, userId, type: 'MEMBER_LOAN_INTEREST_PROFIT' },
-      _sum: { amount: true },
-    });
-
     res.json({
-      shareValueTotal,
-      calculatedByShares,
-      groupMaxCap: group.maxBigLoanCap,
+      loans,
       effectiveMaxLoan,
+      myInterestProfit: member.memberInterestProfit || 0,
       interestRate: group.interestRate,
-      loanLimitMultiplier: group.loanLimitMultiplier,
       maxRepaymentMonths: group.maxRepaymentMonths,
       requireGuarantor: group.requireGuarantor,
-      myInterestProfit: myProfitAgg._sum.amount || 0,
-      loans,
       guarantorRequests,
-      potentialGuarantors,
+      potentialGuarantors: membersList.map((m: any) => m.user),
     });
   } catch {
     res.status(500).json({ error: 'Imeshindikana kupakia mikopo.' });
   }
 });
 
+router.get('/dashboard-feed', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId, groupId, role } = req.user!;
+    const isLeader = LEADER_ROLES.includes(role);
+
+    const [guarantorRequests, leaderPendingLoans, myActiveLoans, guarantorRepaidNotices] = await Promise.all([
+      prisma.loan.findMany({
+        where: { groupId, guarantorId: userId, guarantorStatus: 'PENDING', status: 'PENDING' },
+        include: { user: { select: { fullName: true } } },
+      }),
+      isLeader
+        ? prisma.loan.findMany({
+            where: { groupId, status: 'PENDING' },
+            include: {
+              user: { select: { fullName: true } },
+              guarantor: { select: { fullName: true } },
+            },
+          })
+        : Promise.resolve([]),
+      prisma.loan.findMany({
+        where: { groupId, userId, status: { in: ['DISBURSED', 'OVERDUE', 'REPAYMENT_PENDING'] } },
+        include: { guarantor: { select: { fullName: true } } },
+      }),
+      prisma.loan.findMany({
+        where: { groupId, guarantorId: userId, guarantorStatus: 'REPAID_NOTIFY' },
+        include: { user: { select: { fullName: true } } },
+      }),
+    ]);
+
+    res.json({
+      guarantorRequests,
+      leaderPendingLoans,
+      unreadAnnouncements: [],
+      myActiveLoans,
+      guarantorRepaidNotices,
+    });
+  } catch {
+    res.status(500).json({ error: 'Imeshindikana kupakia arifa za dashboard.' });
+  }
+});
 router.post('/apply', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const { userId, groupId } = req.user!;
     const amount = Number(req.body.amount);
-    const months = Number(req.body.months) || 1;
     const guarantorId = req.body.guarantorId ? String(req.body.guarantorId) : null;
 
-    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    const [group, myShares, activeLoans] = await Promise.all([
+      prisma.group.findUnique({ where: { id: groupId } }),
+      prisma.shareRecord.aggregate({ where: { groupId, userId }, _sum: { amountPaid: true } }),
+      prisma.loan.findMany({
+        where: { groupId, userId, status: { in: ['PENDING', 'DISBURSED', 'OVERDUE', 'REPAYMENT_PENDING'] } },
+      }),
+    ]);
+
     if (!group) return res.status(404).json({ error: 'Kikoba hakijapatikana.' });
 
-    if (months < 1 || months > group.maxRepaymentMonths) {
-      return res.status(400).json({ error: `Muda wa marejesho usizidi miezi ${group.maxRepaymentMonths}.` });
+    const mySharesVal = myShares._sum.amountPaid || 0;
+    const activeDebt = activeLoans.reduce((s: number, l: any) => s + Math.max(0, l.totalRepayable - l.amountPaid), 0);
+    let rawMax = mySharesVal * (group.loanLimitMultiplier || 3);
+    if (group.maxBigLoanCap && group.maxBigLoanCap > 0) {
+      rawMax = Math.min(rawMax, group.maxBigLoanCap);
     }
-    if (group.requireGuarantor && !guarantorId) {
-      return res.status(400).json({ error: 'Lazima uchague mwanachama mdhamini kabla ya kuomba mkopo.' });
-    }
-    if (guarantorId === userId) {
-      return res.status(400).json({ error: 'Huwezi kujidhamini wewe mwenyewe.' });
-    }
+    const maxAllowed = Math.max(0, rawMax - activeDebt);
 
-    const myShares = await prisma.shareRecord.aggregate({
-      where: { userId, groupId },
-      _sum: { amountPaid: true },
-    });
-    const calculatedByShares = (myShares._sum.amountPaid || 0) * group.loanLimitMultiplier;
-    const effectiveMaxLoan =
-      group.maxBigLoanCap > 0
-        ? Math.min(calculatedByShares, group.maxBigLoanCap)
-        : calculatedByShares;
-
-    if (amount <= 0 || amount > effectiveMaxLoan) {
+    if (!amount || amount <= 0 || amount > maxAllowed) {
       return res.status(400).json({
-        error: `Kiasi kimezidi ukomo wako wa mkopo (TZS ${effectiveMaxLoan.toLocaleString()}).`,
+        error: `Kiasi kimezidi ukomo wako wa mkopo (TZS ${maxAllowed.toLocaleString()}).`,
       });
     }
 
-    const totalInterest = Math.round(((amount * group.interestRate) / 100) * months);
-    const totalRepayable = amount + totalInterest;
+    if (group.requireGuarantor && !guarantorId) {
+      return res.status(400).json({ error: 'Lazima uchague mdhamini.' });
+    }
 
-    const rawDue = new Date();
-    rawDue.setMonth(rawDue.getMonth() + months);
-    const alignedDueDate = alignToNextMeetingDay(rawDue, group.meetingDayOfWeek);
-
-    const rawFirstInterest = new Date();
-    rawFirstInterest.setMonth(rawFirstInterest.getMonth() + 1);
-    const alignedFirstInterest = alignToNextMeetingDay(rawFirstInterest, group.meetingDayOfWeek);
+    const months = Math.max(1, group.maxRepaymentMonths || 1);
+    const interest = Math.round((amount * (group.interestRate || 10) * months) / 100);
 
     const loan = await prisma.loan.create({
       data: {
         groupId,
         userId,
         principalAmount: amount,
-        interestRate: group.interestRate,
         repaymentMonths: months,
-        totalRepayable,
-        dueDate: alignedDueDate,
-        nextInterestDue: alignedFirstInterest,
-        guarantorId: group.requireGuarantor ? guarantorId : null,
-        guarantorStatus: group.requireGuarantor ? 'PENDING' : 'ACCEPTED',
-        status: group.requireGuarantor ? 'AWAITING_GUARANTOR' : 'PENDING',
+        totalRepayable: amount + interest,
+        guarantorId,
+        guarantorStatus: guarantorId ? 'PENDING' : 'ACCEPTED',
+        status: 'PENDING',
       },
     });
 
-    res.status(201).json({
-      message: group.requireGuarantor
-        ? 'Ombi limetumwa kwa mdhamini wako! Tarehe ya marejesho imepangwa siku ya kikao.'
-        : 'Ombi la mkopo limetumwa kwa viongozi!',
-      loan,
-    });
+    res.status(201).json({ message: 'Ombi la mkopo limetumwa kikamilifu!', loan });
   } catch {
     res.status(500).json({ error: 'Imeshindikana kutuma ombi la mkopo.' });
   }
@@ -152,131 +159,184 @@ router.post('/apply', authenticateToken, async (req: AuthRequest, res: Response)
 
 router.post('/guarantor-respond/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    const userId = req.user!.userId;
+    const { userId } = req.user!;
     const id = String(req.params.id);
     const decision = String(req.body.decision);
 
     const loan = await prisma.loan.findUnique({ where: { id } });
     if (!loan || loan.guarantorId !== userId) {
-      return res.status(403).json({ error: 'Huna ruhusa ya kujibu udhamini huu.' });
+      return res.status(404).json({ error: 'Ombi halijapatikana.' });
     }
 
-    if (decision === 'ACCEPT') {
-      await prisma.loan.update({
-        where: { id },
-        data: { guarantorStatus: 'ACCEPTED', status: 'PENDING' },
-      });
-      return res.json({ message: 'Umekubali udhamini! Ombi sasa limepelekwa kwa uongozi.' });
-    } else {
-      await prisma.loan.update({
-        where: { id },
-        data: { guarantorStatus: 'REJECTED', status: 'REJECTED' },
-      });
-      return res.json({ message: 'Umekataa udhamini wa mkopo huu.' });
-    }
+    await prisma.loan.update({
+      where: { id },
+      data: {
+        guarantorStatus: decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED',
+        status: decision === 'ACCEPT' ? 'PENDING' : 'REJECTED',
+      },
+    });
+
+    res.json({ message: decision === 'ACCEPT' ? 'Umekubali kuwa mdhamini!' : 'Umekataa udhamini.' });
   } catch {
-    res.status(500).json({ error: 'Imeshindikana kushughulikia udhamini.' });
+    res.status(500).json({ error: 'Imeshindikana kujibu udhamini.' });
   }
 });
 
 router.post('/approve/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    const { userId, groupId, role } = req.user!;
-    const id = String(req.params.id);
+    const { groupId, role } = req.user!;
     if (!LEADER_ROLES.includes(role)) {
-      return res.status(403).json({ error: 'Viongozi pekee ndio wanaweza kuidhinisha mkopo.' });
+      return res.status(403).json({ error: 'Viongozi pekee ndio wanaweza kuidhinisha.' });
     }
 
-    const loan = await prisma.loan.findUnique({
-      where: { id },
-      include: { approvals: true, group: true },
-    });
+    const id = String(req.params.id);
+    const loan = await prisma.loan.findUnique({ where: { id } });
     if (!loan || loan.groupId !== groupId) {
       return res.status(404).json({ error: 'Mkopo haujapatikana.' });
     }
-    if (loan.group.requireGuarantor && loan.guarantorStatus !== 'ACCEPTED') {
-      return res.status(400).json({ error: 'Mdhamini bado hajakubali mkopo huu.' });
-    }
 
-    const alreadyApproved = loan.approvals.some((a) => a.leaderId === userId);
-    if (alreadyApproved) {
-      return res.status(400).json({ error: 'Tayari umeshapiga kura ya kuidhinisha mkopo huu.' });
-    }
+    const dueDate = new Date(Date.now() + (loan.repaymentMonths || 1) * 30 * 24 * 60 * 60 * 1000);
 
-    await prisma.loanApproval.create({
-      data: { loanId: loan.id, leaderId: userId, role },
+    await prisma.loan.update({
+      where: { id },
+      data: { status: 'DISBURSED', disbursedAt: new Date(), dueDate },
     });
 
-    const leadersCount = await prisma.groupMember.count({
-      where: { groupId, isActive: true, role: { in: LEADER_ROLES } },
-    });
-    const requiredApprovals = leadersCount <= 1 ? 1 : 2;
-    const totalApprovals = loan.approvals.length + 1;
-
-    if (totalApprovals >= requiredApprovals) {
-      const rawDue = new Date();
-      rawDue.setMonth(rawDue.getMonth() + loan.repaymentMonths);
-      const alignedDueDate = alignToNextMeetingDay(rawDue, loan.group.meetingDayOfWeek);
-
-      const rawNextInt = new Date();
-      rawNextInt.setMonth(rawNextInt.getMonth() + 1);
-      const alignedNextInt = alignToNextMeetingDay(rawNextInt, loan.group.meetingDayOfWeek);
-
-      await prisma.loan.update({
-        where: { id: loan.id },
-        data: {
-          status: 'DISBURSED',
-          disbursedAt: new Date(),
-          dueDate: alignedDueDate,
-          nextInterestDue: alignedNextInt,
-        },
-      });
-      return res.json({ message: 'Mkopo umeidhinishwa! Tarehe za marejesho zimepangwa siku za kikao.' });
-    }
-
-    res.json({ message: `Idhini yako imepokelewa (${totalApprovals}/${requiredApprovals}).` });
+    res.json({ message: 'Mkopo umeidhinishwa na kutolewa!' });
   } catch {
     res.status(500).json({ error: 'Imeshindikana kuidhinisha mkopo.' });
   }
 });
-
-router.post('/approve-overdue-fine', authenticateToken, async (req: AuthRequest, res: Response) => {
+router.post('/pay-monthly-interest/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const { groupId, role } = req.user!;
-    if (role !== 'CHAIRPERSON') {
-      return res.status(403).json({ error: 'Mwenyekiti pekee ndiye anayeidhinisha faini ya kuchelewesha marejesho.' });
+    if (!LEADER_ROLES.includes(role)) {
+      return res.status(403).json({ error: 'Viongozi pekee ndio wanaweza kuthibitisha malipo ya riba.' });
+    }
+    const id = String(req.params.id);
+    const loan = await prisma.loan.findUnique({ where: { id } });
+    if (!loan || loan.groupId !== groupId) {
+      return res.status(404).json({ error: 'Mkopo haujapatikana.' });
     }
 
-    const { targetUserId, type, customAmount } = req.body;
-    const group = await prisma.group.findUnique({ where: { id: groupId } });
-    if (!group) return res.status(404).json({ error: 'Kikoba hakijapatikana.' });
+    const months = Math.max(1, loan.repaymentMonths || 1);
+    const totalInterest = Math.max(0, loan.totalRepayable - loan.principalAmount);
+    const oneMonthInterest = Math.round(totalInterest / months);
 
-    const amount =
-      Number(customAmount) > 0
-        ? Number(customAmount)
-        : type === 'TOPUP'
-        ? group.lateTopUpPenalty
-        : group.lateLoanInterestPenalty;
+    await prisma.$transaction(async (tx: any) => {
+      await tx.loan.update({
+        where: { id },
+        data: { amountPaid: { increment: oneMonthInterest }, status: 'DISBURSED' },
+      });
 
-    const reason =
-      type === 'TOPUP'
-        ? 'Faini ya kuvuka siku ya kikao bila kurejesha Papo ya hiari (Imeidhinishwa na Mwenyekiti)'
-        : 'Faini ya kuvuka siku ya kikao bila kurejesha riba ya mkopo mkubwa (Imeidhinishwa na Mwenyekiti)';
-
-    await prisma.fineRecord.create({
-      data: {
-        groupId,
-        userId: String(targetUserId),
-        category: type === 'TOPUP' ? 'LATE_TOPUP_PAPO' : 'LATE_BIG_LOAN',
-        reason,
-        amount: amount || 5000,
-        isPaid: false,
-      },
+      await tx.transaction.create({
+        data: {
+          groupId,
+          userId: loan.userId,
+          type: 'LOAN_INTEREST_REPAYMENT',
+          amount: oneMonthInterest,
+          notes: 'Malipo ya riba ya mwezi ya mkopo mkubwa',
+        },
+      });
     });
 
-    res.json({ message: 'Faini ya kuchelewesha marejesho imeidhinishwa na kuwekwa kwenye daftari la mwanachama!' });
+    res.json({ message: `Riba ya mwezi (TZS ${oneMonthInterest.toLocaleString()}) imelipwa na kufutwa!` });
   } catch {
-    res.status(500).json({ error: 'Imeshindikana kuidhinisha faini.' });
+    res.status(500).json({ error: 'Imeshindikana kurekodi malipo ya riba.' });
+  }
+});
+
+router.post('/request-repay/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId, groupId } = req.user!;
+    const id = String(req.params.id);
+    const loan = await prisma.loan.findUnique({ where: { id } });
+    if (!loan || loan.groupId !== groupId || loan.userId !== userId) {
+      return res.status(404).json({ error: 'Mkopo haujapatikana.' });
+    }
+    await prisma.loan.update({
+      where: { id },
+      data: { status: 'REPAYMENT_PENDING' },
+    });
+    res.json({ message: 'Ombi la kurejesha mkopo limetumwa kwa kiongozi kuthibitisha!' });
+  } catch {
+    res.status(500).json({ error: 'Imeshindikana kutuma ombi la marejesho.' });
+  }
+});
+
+router.post('/confirm-repay/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { groupId, role } = req.user!;
+    if (!LEADER_ROLES.includes(role)) {
+      return res.status(403).json({ error: 'Viongozi pekee ndio wanaweza kuthibitisha marejesho.' });
+    }
+    const id = String(req.params.id);
+    const loan = await prisma.loan.findUnique({ where: { id } });
+    if (!loan || loan.groupId !== groupId) {
+      return res.status(404).json({ error: 'Mkopo haujapatikana.' });
+    }
+
+    const remainingTotal = Math.max(0, loan.totalRepayable - loan.amountPaid);
+    const totalInterest = Math.max(0, loan.totalRepayable - loan.principalAmount);
+    const remainingInterest = Math.max(0, totalInterest - Math.min(totalInterest, loan.amountPaid));
+    const remainingPrincipal = Math.max(0, remainingTotal - remainingInterest);
+
+    await prisma.$transaction(async (tx: any) => {
+      await tx.loan.update({
+        where: { id },
+        data: {
+          status: 'PAID',
+          amountPaid: loan.totalRepayable,
+          guarantorStatus: loan.guarantorId ? 'REPAID_NOTIFY' : loan.guarantorStatus,
+        },
+      });
+
+      if (remainingPrincipal > 0) {
+        await tx.transaction.create({
+          data: {
+            groupId,
+            userId: loan.userId,
+            type: 'LOAN_REPAYMENT',
+            amount: remainingPrincipal,
+            notes: 'Marejesho ya mtaji wa mkopo mkubwa',
+          },
+        });
+      }
+
+      if (remainingInterest > 0) {
+        await tx.transaction.create({
+          data: {
+            groupId,
+            userId: loan.userId,
+            type: 'LOAN_INTEREST_REPAYMENT',
+            amount: remainingInterest,
+            notes: 'Malipo ya riba ya mkopo mkubwa',
+          },
+        });
+      }
+    });
+
+    res.json({ message: 'Marejesho yamethibitishwa na mdhamini amearifiwa!' });
+  } catch {
+    res.status(500).json({ error: 'Imeshindikana kuthibitisha marejesho.' });
+  }
+});
+
+router.post('/dismiss-guarantor-notice/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.user!;
+    const id = String(req.params.id);
+    const loan = await prisma.loan.findUnique({ where: { id } });
+    if (!loan || loan.guarantorId !== userId) {
+      return res.status(404).json({ error: 'Taarifa haijapatikana.' });
+    }
+    await prisma.loan.update({
+      where: { id },
+      data: { guarantorStatus: 'ACCEPTED' },
+    });
+    res.json({ message: 'Ujumbe umefutwa.' });
+  } catch {
+    res.status(500).json({ error: 'Imeshindikana kufuta ujumbe.' });
   }
 });
 

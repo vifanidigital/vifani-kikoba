@@ -320,4 +320,51 @@ router.post('/switch-group', authenticateToken, async (req: AuthRequest, res: Re
   }
 });
 
+
+router.put('/update-profile', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const fullName = String(req.body.fullName || '').trim();
+    if (fullName.length < 2) {
+      return res.status(400).json({ error: 'Weka jina kamili lenye angalau herufi 2.' });
+    }
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { fullName },
+    });
+    res.json({ message: 'Jina lako limesasishwa kikamilifu!', user: { id: user.id, fullName: user.fullName, phone: user.phone } });
+  } catch {
+    res.status(500).json({ error: 'Imeshindikana kusasisha wasifu.' });
+  }
+});
+
+router.post('/change-pin', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const oldPin = String(req.body.oldPin || '').trim();
+    const newPin = strictPinSchema.parse(req.body.newPin);
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: 'Mtumiaji hajapatikana.' });
+
+    const isOldValid = await bcrypt.compare(oldPin, user.pinHash);
+    if (!isOldValid) {
+      return res.status(401).json({ error: 'PIN ya zamani uliyoingiza si sahihi.' });
+    }
+
+    const newPinHash = await bcrypt.hash(newPin, 10);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { pinHash: newPinHash },
+    });
+
+    res.json({ message: 'PIN yako ya siri imebadilishwa kikamilifu!' });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.issues[0].message });
+    }
+    res.status(500).json({ error: 'Imeshindikana kubadili PIN.' });
+  }
+});
+
 export default router;

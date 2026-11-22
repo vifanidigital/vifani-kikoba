@@ -29,6 +29,7 @@ model User {
   transactions        Transaction[]
   terminationRequests MemberTermination[] @relation("TerminationTarget")
   terminationVotes    TerminationVote[]
+  loanAcks LoanAnnouncementAck[]
 }
 
 model Group {
@@ -36,6 +37,7 @@ model Group {
   name                String
   groupType           String   @default("KIKOBA")
   announcement        String?
+  constitution      String?
   meetingDayOfWeek    Int      @default(4)
   meetingTime         String   @default("16:00")
   meetingVenue        String?
@@ -86,6 +88,8 @@ model Group {
   fines        FineRecord[]
   transactions Transaction[]
   terminations MemberTermination[]
+    expenses     GroupExpense[]
+  ruleLogs     RuleChangeLog[]
 }
 
 model GroupMember {
@@ -187,6 +191,7 @@ model Loan {
   disbursedAt     DateTime?
   createdAt       DateTime       @default(now())
   approvals       LoanApproval[]
+  acks LoanAnnouncementAck[]
 }
 
 model LoanApproval {
@@ -224,4 +229,36 @@ model Transaction {
   amount    Float
   notes     String?
   createdAt DateTime @default(now())
+}
+
+model LoanAnnouncementAck {
+  id        String   @id @default(uuid())
+  loanId    String
+  loan      Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ackedAt   DateTime @default(now())
+
+  @@unique([loanId, userId])
+}
+
+model GroupExpense {
+  id          String   @id @default(uuid())
+  groupId     String
+  group       Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  category    String   @default("SOCIAL_FUND") // SOCIAL_FUND au OPERATIONS
+  title       String
+  beneficiary String?
+  amount      Float
+  recordedBy  String
+  createdAt   DateTime @default(now())
+}
+
+model RuleChangeLog {
+  id          String   @id @default(uuid())
+  groupId     String
+  group       Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  changedBy   String
+  summary     String
+  createdAt   DateTime @default(now())
 }

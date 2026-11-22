@@ -7,185 +7,222 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  RefreshControl,
+  Linking,
   Modal,
   Switch,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { apiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import { getCachedData, setCachedData } from '../utils/cache';
 
-const DAYS_OF_WEEK = [
-  { key: 'MONDAY', label: 'Jumatatu' },
-  { key: 'TUESDAY', label: 'Jumanne' },
-  { key: 'WEDNESDAY', label: 'Jumatano' },
-  { key: 'THURSDAY', label: 'Alhamisi' },
-  { key: 'FRIDAY', label: 'Ijumaa' },
-  { key: 'SATURDAY', label: 'Jumamosi' },
-  { key: 'SUNDAY', label: 'Jumapili' },
-];
+const LEADER_ROLES = ['CHAIRPERSON', 'SECRETARY', 'TREASURER'];
 
 export default function WanachamaSheriaScreen() {
-  const { user, group, role, signOut } = useAuth();
-  const isChair = role === 'CHAIRPERSON';
-  const isLeader = role === 'CHAIRPERSON' || role === 'SECRETARY' || role === 'TREASURER';
+  const insets = useSafeAreaInsets();
+  const { role } = useAuth();
+  const { isDark } = useTheme();
 
-  const [loading, setLoading] = useState(true);
+  const isChairperson = role === 'CHAIRPERSON';
+  const isLeader = LEADER_ROLES.includes(String(role || ''));
+
+  const [syncing, setSyncing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [members, setMembers] = useState<any[]>([]);
-  const [terminations, setTerminations] = useState<any[]>([]);
-  const [settings, setSettings] = useState<any>(null);
+  const [activeSection, setActiveSection] = useState<'MEMBERS' | 'RULES' | 'CONSTITUTION'>('MEMBERS');
 
-  const [openSection, setOpenSection] = useState<string | null>(null);
+  const [group, setGroup] = useState<any>(null);
+  const [directory, setDirectory] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [contactMember, setContactMember] = useState<any>(null);
+  const [auditedUserId, setAuditedUserId] = useState<string | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditData, setAuditData] = useState<any>(null);
 
-  const [newName, setNewName] = useState('');
-  const [newPhone, setNewPhone] = useState('');
-  const [newRole, setNewRole] = useState('MEMBER');
+  const [isEditingConstitution, setIsEditingConstitution] = useState(false);
+  const [constitutionDraft, setConstitutionDraft] = useState('');
 
-  const [announcementText, setAnnouncementText] = useState('');
+  const [isEditingRules, setIsEditingRules] = useState(false);
+  const [rulesForm, setRulesForm] = useState<any>({});
 
-  const [editMember, setEditMember] = useState<any>(null);
-  const [editName, setEditName] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-  const [editRole, setEditRole] = useState('MEMBER');
-  const [terminateReason, setTerminateReason] = useState('');
+  const loadOffice = async () => {
+  const cacheKey = `office_rules_${role || 'M'}`;
 
-  const toggleSection = (key: string) => {
-    setOpenSection((prev) => (prev === key ? null : key));
-  };
+  const cached = await getCachedData<any>(cacheKey);
+  if (cached) {
+    setGroup(cached.group || null);
+    setDirectory(Array.isArray(cached.directory) ? cached.directory : []);
+    setConstitutionDraft(cached.group?.constitution || '');
+    setRulesForm(cached.group || {});
+  }
 
-  const loadData = async () => {
-    try {
-      const [memRes, setRes] = await Promise.all([
-        apiClient.get('/members'),
-        apiClient.get('/group/settings'),
-      ]);
-      setMembers(Array.isArray(memRes.data?.members) ? memRes.data.members : []);
-      setTerminations(Array.isArray(memRes.data?.terminations) ? memRes.data.terminations : []);
-      const g = setRes.data?.group || null;
-      setSettings(g);
-      setAnnouncementText(g?.announcement || '');
-    } catch (error: any) {
-      console.log('Hitilafu kupakia Ofisi:', error?.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  setSyncing(true);
+  try {
+    const res = await apiClient.get('/group/settings');
+    const g = res.data?.group || null;
+    const dir = Array.isArray(res.data?.directory) ? res.data.directory : [];
+    setGroup(g);
+    setDirectory(dir);
+    setConstitutionDraft(g?.constitution || '');
+    setRulesForm(g || {});
+    await setCachedData(cacheKey, { group: g, directory: dir });
+  } catch (error: any) {
+    console.log('Inatumia cache ya ofisi:', error?.message);
+  } finally {
+    setSyncing(false);
+    setRefreshing(false);
+  }
+};
+
 
   useFocusEffect(
     useCallback(() => {
-      loadData();
+      loadOffice();
     }, [])
   );
 
-  const handleSaveSettings = async () => {
-    if (!settings) return;
-    setSaving(true);
+  const handleCallMember = (phone: string, name: string) => {
+    if (!phone) return Alert.alert('Samahani', 'Mwanachama huyu hana namba ya simu.');
+    Linking.openURL(`tel:${phone}`).catch(() => {
+      Alert.alert('Hitilafu', `Imeshindikana kufungua kipiga simu kwa ${name}.`);
+    });
+  };
+
+  const handleSmsMember = (phone: string, name: string) => {
+    if (!phone) return Alert.alert('Samahani', 'Mwanachama huyu hana namba ya simu.');
+    Linking.openURL(`sms:${phone}`).catch(() => {
+      Alert.alert('Hitilafu', `Imeshindikana kufungua sehemu ya ujumbe kwa ${name}.`);
+    });
+  };
+  const handleInspectMember = async (targetUserId: string) => {
+    if (!isLeader) return;
+    if (auditedUserId === targetUserId) {
+      setAuditedUserId(null);
+      setAuditData(null);
+      return;
+    }
+    setAuditedUserId(targetUserId);
+    setAuditLoading(true);
     try {
-      const res = await apiClient.put('/group/settings', settings);
-      Alert.alert('Imefanikiwa', res.data?.message || 'Sheria zimehifadhiwa!');
-      setOpenSection(null);
-      loadData();
+      const res = await apiClient.get(`/group/member-audit/${targetUserId}`);
+      setAuditData(res.data || null);
     } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kuhifadhi.');
+      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kuvuta taarifa.');
+      setAuditedUserId(null);
     } finally {
-      setSaving(false);
+      setAuditLoading(false);
     }
   };
 
-  const handlePublishAnnouncement = async () => {
+  const handlePickConstitutionDoc = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: [
+          'text/plain',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+      const asset = result.assets[0];
+      const fileName = asset.name || 'Katiba';
+
+      if (fileName.toLowerCase().endsWith('.txt')) {
+        const content = await FileSystem.readAsStringAsync(asset.uri);
+        setConstitutionDraft(content);
+        setIsEditingConstitution(true);
+        Alert.alert('Faili Limepakiwa', `Maandishi kutoka "${fileName}" yamepakiwa. Hakiki kisha bonyeza Hifadhi Katiba.`);
+      } else {
+        setIsEditingConstitution(true);
+        Alert.alert(
+          'Faili Limechaguliwa',
+          `Umechagua faili "${fileName}". Nakili (Copy) maandishi kutoka kwenye faili lako la Word na uyabandike (Paste) hapa chini, kisha ubonyeze Hifadhi Katiba.`
+        );
+      }
+    } catch {
+      Alert.alert('Hitilafu', 'Imeshindikana kusoma faili ulilochagua.');
+    }
+  };
+    const handleShareConstitutionPdf = async () => {
+    try {
+      const safeGroupName = String(group?.name || 'KIKOBA')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      const textBody = String(group?.constitution || 'Katiba bado haijaandikwa.')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br/>');
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head><meta charset="utf-8" /></head>
+          <body style="font-family: sans-serif; padding: 28px; color: #1e293b; line-height: 1.6;">
+            <div style="text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; margin-bottom: 18px;">
+              <h1 style="color: #0f766e; margin: 0; font-size: 20px;">${safeGroupName}</h1>
+              <p style="margin: 4px 0 0; font-size: 12px; color: #475569; font-weight: bold;">KATIBA NA KANUNI ZA KIKUNDI</p>
+            </div>
+            <div style="font-size: 13px; text-align: justify;">${textBody}</div>
+            <div style="margin-top: 24px; padding: 12px; background: #f1f5f9; border-radius: 8px; font-size: 11px;">
+              <strong>Muhtasari wa Masharti ya Fedha:</strong><br/>
+              • Thamani ya Hisa: TZS ${Number(group?.shareValue || 0).toLocaleString()} (Hisa ${group?.minSharesPerMeeting}-${group?.maxSharesPerMeeting} kwa kikao)<br/>
+              • Mfuko wa Jamii: TZS ${Number(group?.socialFundMin || 0).toLocaleString()} - TZS ${Number(group?.socialFundMax || 0).toLocaleString()}<br/>
+              • Riba ya Papo: ${group?.papoMeetingInterest || 0}% | Riba ya Mkopo Mkubwa: ${group?.interestRate || 10}% (Miezi ${group?.maxRepaymentMonths})
+            </div>
+            <p style="margin-top: 20px; font-size: 10px; color: #64748b; text-align: center;">
+              Imetolewa kupitia Mfumo wa Vifani Kikoba • ${new Date().toLocaleDateString('sw-TZ')}
+            </p>
+          </body>
+        </html>
+      `;
+            await Print.printAsync({ html });
+      
+
+    } catch (err: any) {
+      console.log('PDF Error:', err?.message);
+      Alert.alert('Hitilafu ya PDF', err?.message || 'Imeshindikana kutengeneza PDF ya Katiba.');
+    }
+  };
+
+  const handleSaveConstitution = async () => {
     setSaving(true);
     try {
-      const res = await apiClient.put('/group/announcement', { announcement: announcementText });
+      const res = await apiClient.put('/group/constitution', { constitution: constitutionDraft });
       Alert.alert('Imefanikiwa', res.data?.message);
-      setOpenSection(null);
-      loadData();
+      setIsEditingConstitution(false);
+      loadOffice();
     } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kuchapisha tangazo.');
+      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kuhifadhi Katiba.');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleAddMember = async () => {
-    if (newName.trim().length < 2 || newPhone.trim().length < 10) {
-      return Alert.alert('Angalia Taarifa', 'Weka jina kamili na namba sahihi ya simu.');
-    }
+  const handleSaveRules = async () => {
     setSaving(true);
     try {
-      const res = await apiClient.post('/members/add', {
-        fullName: newName.trim(),
-        phone: newPhone.trim(),
-        role: newRole,
-      });
+      const res = await apiClient.put('/group/settings', rulesForm);
       Alert.alert('Imefanikiwa', res.data?.message);
-      setNewName('');
-      setNewPhone('');
-      setNewRole('MEMBER');
-      setOpenSection(null);
-      loadData();
+      setIsEditingRules(false);
+      loadOffice();
     } catch (error: any) {
-      Alert.alert('Imeshindikana', error.response?.data?.error || 'Hitilafu imetokea.');
+      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kuhifadhi sheria.');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const openEditMemberModal = (m: any) => {
-    if (!isChair) return;
-    setEditMember(m);
-    setEditName(m.fullName);
-    setEditPhone(m.phone);
-    setEditRole(m.role);
-    setTerminateReason('');
-  };
-
-  const handleUpdateMember = async () => {
-    if (!editMember) return;
-    setSaving(true);
-    try {
-      const res = await apiClient.put(`/members/update/${editMember.userId}`, {
-        fullName: editName.trim(),
-        phone: editPhone.trim(),
-        role: editRole,
-      });
-      Alert.alert('Imesasishwa', res.data?.message);
-      setEditMember(null);
-      loadData();
-    } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kurekebisha.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleInitiateTermination = async () => {
-    if (!editMember || terminateReason.trim().length < 3) {
-      return Alert.alert('Weka Sababu', 'Andika sababu ya kusitisha uanachama wake.');
-    }
-    setSaving(true);
-    try {
-      const res = await apiClient.post('/members/initiate-termination', {
-        targetUserId: editMember.userId,
-        reason: terminateReason.trim(),
-      });
-      Alert.alert('Kura Imeanzishwa', res.data?.message);
-      setEditMember(null);
-      loadData();
-    } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kuanzisha kura.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleVoteTermination = async (terminationId: string, approveRemove: boolean) => {
-    try {
-      const res = await apiClient.post(`/members/vote-termination/${terminationId}`, { approveRemove });
-      Alert.alert('Kura Imepokelewa', res.data?.message);
-      loadData();
-    } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kupiga kura.');
     }
   };
 
@@ -196,510 +233,688 @@ export default function WanachamaSheriaScreen() {
     return 'Mwanachama';
   };
 
-  if (loading) {
-    return (
-      <View className="flex-1 justify-center items-center bg-slate-100">
-        <ActivityIndicator size="large" color="#0f766e" />
-      </View>
-    );
-  }
+  const getDayName = (d: number) => {
+    const days = ['Jumapili', 'Jumatatu', 'Jumanne', 'Jumatano', 'Alhamisi', 'Ijumaa', 'Jumamosi'];
+    return days[d] || 'Alhamisi';
+  };
+  const bgClass = isDark ? 'bg-slate-950' : 'bg-slate-100';
+  const cardClass = isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
+  const textMain = isDark ? 'text-white' : 'text-slate-900';
+  const textSub = isDark ? 'text-slate-400' : 'text-slate-500';
+  const inputClass = isDark
+    ? 'bg-slate-800 border-slate-700 text-white'
+    : 'bg-slate-50 border-slate-300 text-slate-900';
+
+
+  const filteredDirectory = directory.filter(
+    (m) =>
+      m.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(m.phone || '').includes(searchQuery)
+  );
 
   return (
-    <View className="flex-1 bg-slate-100">
-      <View className="bg-teal-700 pt-14 pb-6 px-6 rounded-b-3xl">
-        <Text className="text-2xl font-bold text-white">
-          {isChair ? 'Ofisi ya Mwenyekiti' : isLeader ? `Ofisi ya ${getRoleLabel(role || '')}` : 'Wanachama & Katiba'}
-        </Text>
+    <View className={`flex-1 ${bgClass}`}>
+      <View
+        style={{ paddingTop: Math.max(insets.top + 10, 44) }}
+        className="bg-teal-700 pb-5 px-6 rounded-b-3xl"
+      >
+        <Text className="text-2xl font-bold text-white">Ofisi & Sheria</Text>
         <Text className="text-teal-100 text-xs mt-1">
-          {group?.name} • {user?.fullName} ({getRoleLabel(role || 'MEMBER')})
+          Wanachama, Mawasiliano, Sheria za Kikoba & Katiba
         </Text>
+             {syncing && (
+       <View className="flex-row items-center gap-1.5 mt-2 bg-teal-900/60 self-start px-3 py-1 rounded-full">
+         <ActivityIndicator size="small" color="#5eead4" />
+         <Text className="text-teal-100 text-[10px] font-bold">Inasasisha taarifa...</Text>
+       </View>
+     )}
+
+
+        <View className="flex-row bg-teal-800/70 p-1 rounded-xl mt-4">
+          <TouchableOpacity
+            onPress={() => setActiveSection('MEMBERS')}
+            className={`flex-1 py-2 rounded-lg items-center ${activeSection === 'MEMBERS' ? 'bg-white' : ''}`}
+          >
+            <Text className={`font-bold text-[11px] ${activeSection === 'MEMBERS' ? 'text-teal-800' : 'text-teal-100'}`}>
+              Wanachama ({directory.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveSection('RULES')}
+            className={`flex-1 py-2 rounded-lg items-center ${activeSection === 'RULES' ? 'bg-white' : ''}`}
+          >
+            <Text className={`font-bold text-[11px] ${activeSection === 'RULES' ? 'text-teal-800' : 'text-teal-100'}`}>
+              Sheria & Faini
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveSection('CONSTITUTION')}
+            className={`flex-1 py-2 rounded-lg items-center ${activeSection === 'CONSTITUTION' ? 'bg-white' : ''}`}
+          >
+            <Text className={`font-bold text-[11px] ${activeSection === 'CONSTITUTION' ? 'text-teal-800' : 'text-teal-100'}`}>
+              Katiba & PDF
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <ScrollView className="flex-1 px-5 pt-4">
-        {Boolean(settings?.announcement) && (
-          <View className="bg-amber-50 border border-amber-300 p-4 rounded-2xl mb-4 flex-row gap-3 items-start">
-            <Ionicons name="megaphone" size={22} color="#b45309" />
-            <View className="flex-1">
-              <Text className="font-bold text-amber-900 text-xs uppercase">Tangazo la Kikoba</Text>
-              <Text className="text-slate-800 text-sm mt-0.5">{settings.announcement}</Text>
-            </View>
-          </View>
-        )}
-
-        {terminations.length > 0 && (
-          <View className="bg-rose-50 border border-rose-300 p-4 rounded-2xl mb-4">
-            <Text className="font-bold text-rose-900 text-sm mb-2">
-              Kura ya Kusitisha Uanachama (Inahitaji Nusu / 50%)
-            </Text>
-            {terminations.map((t) => (
-              <View key={t.id} className="bg-white p-3.5 rounded-xl border border-rose-200 mb-2">
-                <Text className="font-bold text-slate-900">{t.targetName}</Text>
-                <Text className="text-xs text-slate-600 mt-0.5">Sababu: {t.reason}</Text>
-                <Text className="text-xs font-bold text-rose-700 mt-1">
-                  Kura za Ndiyo: {t.yesVotes} / {t.requiredVotes} zinazohitajika
+      <ScrollView
+        className="flex-1 px-5 pt-4"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadOffice(); }} />}
+      >
+        {activeSection === 'MEMBERS' && (
+          <>
+            <View className="bg-slate-900 p-4 rounded-2xl mb-4 border border-slate-800">
+              <Text className="text-teal-300 text-xs font-extrabold uppercase mb-1.5">
+                Ratiba ya Vikao vya Kikundi
+              </Text>
+              <Text className="text-white text-xs">
+                Siku: <Text className="font-bold">{getDayName(Number(group?.meetingDayOfWeek ?? 4))}</Text> • Saa:{' '}
+                <Text className="font-bold">{group?.meetingTime || '16:00'}</Text>
+              </Text>
+              {Boolean(group?.meetingVenue) && (
+                <Text className="text-slate-300 text-xs mt-0.5">
+                  Mahali: <Text className="font-bold">{group?.meetingVenue}</Text>
                 </Text>
-                {t.targetUserId !== user?.id && !t.hasVoted && (
-                  <View className="flex-row gap-2 mt-3">
+              )}
+              <View className="mt-3 pt-2.5 border-t border-slate-800">
+                <Text className="text-teal-300 text-[11px] font-bold uppercase mb-1">Safu ya Uongozi:</Text>
+                {directory
+                  .filter((m) => LEADER_ROLES.includes(m.role))
+                  .map((ld) => (
+                    <Text key={ld.memberId} className="text-slate-200 text-xs py-0.5">
+                      • {getRoleLabel(ld.role)}: <Text className="font-bold">{ld.fullName}</Text> ({ld.phone})
+                    </Text>
+                  ))}
+              </View>
+            </View>
+
+            <View className={`flex-row items-center px-3.5 py-2 rounded-xl border mb-3 ${cardClass}`}>
+              <Ionicons name="search" size={16} color="#64748b" />
+              <TextInput
+                placeholder="Tafuta mwanachama kwa jina au namba..."
+                placeholderTextColor="#94a3b8"
+                className={`flex-1 ml-2 text-xs ${textMain}`}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
+
+            <View className="flex-row items-center gap-1.5 mb-2.5">
+              <Ionicons name="lock-closed" size={14} color="#0f766e" />
+              <Text className={`text-[11px] font-bold ${textSub}`}>
+                {isLeader
+                  ? 'Gusa jina kukagua taarifa za siri, au bonyeza "Mawasiliano"'
+                  : 'Usiri umelindwa • Bonyeza "Mawasiliano" kupiga simu au kutuma ujumbe'}
+              </Text>
+            </View>
+            {filteredDirectory.map((m) => {
+              const isAuditing = auditedUserId === m.userId;
+              return (
+                <View key={m.memberId} className={`p-4 rounded-2xl border mb-2.5 ${cardClass}`}>
+                  <View className="flex-row justify-between items-center">
                     <TouchableOpacity
-                      onPress={() => handleVoteTermination(t.id, true)}
-                      className="flex-1 bg-rose-700 py-2 rounded-lg items-center"
+                      disabled={!isLeader}
+                      onPress={() => handleInspectMember(m.userId)}
+                      className="flex-1 pr-2"
                     >
-                      <Text className="text-white font-bold text-xs">Piga Kura: Asitishwe</Text>
+                      <View className="flex-row items-center gap-2">
+                        <Text className={`font-extrabold text-sm ${textMain}`}>{m.fullName}</Text>
+                        <View className="bg-teal-600/15 px-2 py-0.5 rounded-md">
+                          <Text className="text-[10px] font-bold text-teal-700">{getRoleLabel(m.role)}</Text>
+                        </View>
+                      </View>
+                      <Text className={`text-xs mt-1 font-semibold ${textSub}`}>
+                        Simu: <Text className="text-teal-600 font-bold">{m.phone}</Text> • Alijiunga:{' '}
+                        {new Date(m.joinedAt).toLocaleDateString('sw-TZ')}
+                      </Text>
                     </TouchableOpacity>
+
                     <TouchableOpacity
-                      onPress={() => handleVoteTermination(t.id, false)}
-                      className="flex-1 bg-slate-600 py-2 rounded-lg items-center"
+                      onPress={() => setContactMember(m)}
+                      className="bg-teal-700 px-3.5 py-2.5 rounded-xl flex-row items-center gap-1.5 shadow-sm"
                     >
-                      <Text className="text-white font-bold text-xs">Abaki</Text>
+                      <Ionicons name="chatbubbles-outline" size={16} color="#ffffff" />
+                      <Text className="text-white font-bold text-xs">Mawasiliano</Text>
                     </TouchableOpacity>
                   </View>
-                )}
-              </View>
-            ))}
-          </View>
-        )}
 
-        {isLeader && (
-          <View className="mb-4">
-            <Text className="text-xs font-bold text-slate-500 uppercase mb-2">Majukumu ya Uongozi</Text>
-
-            {/* Kitufe 1: Sajili Mwanachama Mpya */}
-            <TouchableOpacity
-              onPress={() => toggleSection('ADD_MEMBER')}
-              className="bg-white p-4 rounded-2xl border border-slate-200 mb-2 flex-row justify-between items-center"
-            >
-              <View className="flex-row items-center gap-3">
-                <Ionicons name="person-add" size={20} color="#0f766e" />
-                <Text className="font-bold text-slate-800">Sajili Mwanachama Mpya</Text>
-              </View>
-              <Ionicons name={openSection === 'ADD_MEMBER' ? 'chevron-up' : 'chevron-down'} size={20} color="#64748b" />
-            </TouchableOpacity>
-
-            {openSection === 'ADD_MEMBER' && (
-              <View className="bg-white p-4 rounded-2xl border border-teal-200 mb-3">
-                <Text className="text-xs font-bold text-slate-700 mb-1">Jina Kamili</Text>
-                <TextInput
-                  className="bg-slate-50 border border-slate-300 rounded-xl p-3 mb-2 text-slate-900"
-                  placeholder="Mfano: Juma Kassim"
-                  value={newName}
-                  onChangeText={setNewName}
-                />
-                <Text className="text-xs font-bold text-slate-700 mb-1">Namba ya Simu (07... au 2557...)</Text>
-                <TextInput
-                  className="bg-slate-50 border border-slate-300 rounded-xl p-3 mb-3 text-slate-900"
-                  placeholder="0712345678"
-                  keyboardType="numeric"
-                  value={newPhone}
-                  onChangeText={(t) => setNewPhone(t.replace(/[^0-9]/g, ''))}
-                />
-                {isChair && (
-                  <View className="flex-row gap-2 mb-3">
-                    {['MEMBER', 'SECRETARY', 'TREASURER'].map((r) => (
-                      <TouchableOpacity
-                        key={r}
-                        onPress={() => setNewRole(r)}
-                        className={`flex-1 py-2 rounded-lg border items-center ${
-                          newRole === r ? 'bg-teal-700 border-teal-700' : 'bg-slate-50 border-slate-300'
-                        }`}
-                      >
-                        <Text className={`text-xs font-bold ${newRole === r ? 'text-white' : 'text-slate-700'}`}>
-                          {getRoleLabel(r)}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-                <TouchableOpacity onPress={handleAddMember} disabled={saving} className="bg-teal-700 p-3.5 rounded-xl items-center">
-                  <Text className="text-white font-bold">Hifadhi Mwanachama</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Kitufe 2: Tangazo la Kikoba */}
-            <TouchableOpacity
-              onPress={() => toggleSection('ANNOUNCEMENT')}
-              className="bg-white p-4 rounded-2xl border border-slate-200 mb-2 flex-row justify-between items-center"
-            >
-              <View className="flex-row items-center gap-3">
-                <Ionicons name="megaphone-outline" size={20} color="#0f766e" />
-                <Text className="font-bold text-slate-800">Toa Tangazo la Kikundi</Text>
-              </View>
-              <Ionicons name={openSection === 'ANNOUNCEMENT' ? 'chevron-up' : 'chevron-down'} size={20} color="#64748b" />
-            </TouchableOpacity>
-
-            {openSection === 'ANNOUNCEMENT' && (
-              <View className="bg-white p-4 rounded-2xl border border-teal-200 mb-3">
-                <TextInput
-                  className="bg-slate-50 border border-slate-300 rounded-xl p-3 mb-3 text-slate-900"
-                  placeholder="Andika tangazo kwa wanachama wote..."
-                  multiline
-                  value={announcementText}
-                  onChangeText={setAnnouncementText}
-                />
-                <TouchableOpacity onPress={handlePublishAnnouncement} disabled={saving} className="bg-teal-700 p-3.5 rounded-xl items-center">
-                  <Text className="text-white font-bold">Chapisha Tangazo</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {isChair && settings && (
-              <>
-                {/* Kitufe 3: Siku ya Kikao, Muda na Eneo */}
-                <TouchableOpacity
-                  onPress={() => toggleSection('MEETING_SCHEDULE')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 mb-2 flex-row justify-between items-center"
-                >
-                  <View className="flex-row items-center gap-3">
-                    <Ionicons name="calendar-outline" size={20} color="#0f766e" />
-                    <Text className="font-bold text-slate-800">Ratiba ya Kikao (Siku, Muda & Eneo)</Text>
-                  </View>
-                  <Ionicons name={openSection === 'MEETING_SCHEDULE' ? 'chevron-up' : 'chevron-down'} size={20} color="#64748b" />
-                </TouchableOpacity>
-
-                {openSection === 'MEETING_SCHEDULE' && (
-                  <View className="bg-white p-4 rounded-2xl border border-teal-200 mb-3">
-                    <Text className="text-xs font-bold text-slate-700 mb-2">Teua Siku ya Kikao Kila Wiki:</Text>
-                    <View className="flex-row flex-wrap gap-1.5 mb-3">
-                      {DAYS_OF_WEEK.map((day) => (
-                        <TouchableOpacity
-                          key={day.key}
-                          onPress={() => setSettings({ ...settings, meetingDay: day.key })}
-                          className={`px-3 py-1.5 rounded-lg border ${
-                            settings.meetingDay === day.key
-                              ? 'bg-teal-700 border-teal-700'
-                              : 'bg-slate-50 border-slate-300'
-                          }`}
-                        >
-                          <Text
-                            className={`text-xs font-bold ${
-                              settings.meetingDay === day.key ? 'text-white' : 'text-slate-700'
-                            }`}
-                          >
-                            {day.label}
+                  {isLeader && isAuditing && (
+                    <View className="mt-3 pt-3 border-t border-slate-200/30 bg-teal-600/10 p-3 rounded-xl">
+                      {auditLoading ? (
+                        <ActivityIndicator size="small" color="#0f766e" />
+                      ) : auditData ? (
+                        <>
+                          <Text className="text-[11px] font-extrabold text-teal-800 uppercase mb-1.5">
+                            Taarifa za Siri za {m.fullName} (Ukaguzi)
                           </Text>
-                        </TouchableOpacity>
-                      ))}
+                          <View className="flex-row justify-between py-0.5">
+                            <Text className={`text-xs ${textSub}`}>Hisa ({auditData.sharesCount}):</Text>
+                            <Text className={`text-xs font-bold ${textMain}`}>
+                              TZS {Number(auditData.sharesValue || 0).toLocaleString()}
+                            </Text>
+                          </View>
+                          <View className="flex-row justify-between py-0.5">
+                            <Text className={`text-xs ${textSub}`}>Mfuko wa Jamii:</Text>
+                            <Text className={`text-xs font-bold ${textMain}`}>
+                              TZS {Number(auditData.socialFundValue || 0).toLocaleString()}
+                            </Text>
+                          </View>
+                          <View className="flex-row justify-between py-0.5">
+                            <Text className={`text-xs ${textSub}`}>Papo ya Lazima:</Text>
+                            <Text className={`text-xs font-bold ${textMain}`}>
+                              TZS {Number(auditData.papoMandatory || 0).toLocaleString()}
+                            </Text>
+                          </View>
+                          <View className="flex-row justify-between py-0.5">
+                            <Text className={`text-xs ${textSub}`}>Deni la Mkopo Mkubwa:</Text>
+                            <Text className="text-xs font-bold text-amber-600">
+                              TZS {Number(auditData.loanDebt || 0).toLocaleString()}
+                            </Text>
+                          </View>
+                          <View className="flex-row justify-between py-0.5">
+                            <Text className={`text-xs ${textSub}`}>Deni la Papo Hiari:</Text>
+                            <Text className="text-xs font-bold text-amber-600">
+                              TZS {Number(auditData.papoTopUpDebt || 0).toLocaleString()}
+                            </Text>
+                          </View>
+                          <View className="flex-row justify-between py-0.5">
+                            <Text className={`text-xs ${textSub}`}>Faini Zinazodaiwa:</Text>
+                            <Text className="text-xs font-bold text-rose-600">
+                              TZS {Number(auditData.unpaidFines || 0).toLocaleString()}
+                            </Text>
+                          </View>
+                        </>
+                      ) : null}
                     </View>
-
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Muda wa Kikao (mf. 16:00 au Saa 10 Jioni)</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      placeholder="16:00"
-                      value={String(settings.meetingTime || '')}
-                      onChangeText={(v) => setSettings({ ...settings, meetingTime: v })}
-                    />
-
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Eneo la Kikao (Hiari / Optional)</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-3"
-                      placeholder="Mfano: Ukumbi wa Kata / Kwa Mwenyekiti"
-                      value={String(settings.meetingVenue || '')}
-                      onChangeText={(v) => setSettings({ ...settings, meetingVenue: v })}
-                    />
-
-                    <TouchableOpacity onPress={handleSaveSettings} className="bg-teal-700 p-3.5 rounded-xl items-center">
-                      <Text className="text-white font-bold">Hifadhi Ratiba ya Kikao</Text>
-                    </TouchableOpacity>
-                  </View>
+                  )}
+                </View>
+              );
+            })}
+          </>
+        )}
+        {activeSection === 'RULES' && (
+          <>
+            <View className={`p-4 rounded-2xl border mb-4 ${cardClass}`}>
+              <View className="flex-row justify-between items-center mb-3">
+                <Text className="text-xs font-extrabold text-teal-600 uppercase">
+                  Sheria Kuu za Fedha za Kikundi
+                </Text>
+                {isChairperson && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setRulesForm(group || {});
+                      setIsEditingRules(!isEditingRules);
+                    }}
+                    className="bg-teal-700 px-3 py-1.5 rounded-lg"
+                  >
+                    <Text className="text-white font-bold text-[11px]">
+                      {isEditingRules ? 'Ghairi' : 'Hariri Sheria Zote'}
+                    </Text>
+                  </TouchableOpacity>
                 )}
+              </View>
 
-                {/* Kitufe 4: Sheria za Hisa & Mfuko wa Jamii */}
-                <TouchableOpacity
-                  onPress={() => toggleSection('SHARES_RULES')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 mb-2 flex-row justify-between items-center"
-                >
-                  <View className="flex-row items-center gap-3">
-                    <Ionicons name="layers-outline" size={20} color="#0f766e" />
-                    <Text className="font-bold text-slate-800">Sheria za Hisa & Mfuko wa Jamii</Text>
+              {!isEditingRules ? (
+                <>
+                  <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                    <Text className={`text-xs ${textSub}`}>Jina la Kikundi:</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>{group?.name}</Text>
                   </View>
-                  <Ionicons name={openSection === 'SHARES_RULES' ? 'chevron-up' : 'chevron-down'} size={20} color="#64748b" />
-                </TouchableOpacity>
-
-                {openSection === 'SHARES_RULES' && (
-                  <View className="bg-white p-4 rounded-2xl border border-teal-200 mb-3">
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Thamani ya Hisa Moja (TZS)</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.shareValue)}
-                      onChangeText={(v) => setSettings({ ...settings, shareValue: v.replace(/[^0-9]/g, '') })}
-                    />
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Ukomo wa Idadi ya Hisa kwa Kikao</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.maxSharesPerMeeting)}
-                      onChangeText={(v) => setSettings({ ...settings, maxSharesPerMeeting: v.replace(/[^0-9]/g, '') })}
-                    />
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Mfuko wa Jamii (Kianzio / Chini - TZS)</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.socialFundMin)}
-                      onChangeText={(v) => setSettings({ ...settings, socialFundMin: v.replace(/[^0-9]/g, '') })}
-                    />
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Mfuko wa Jamii (Ukomo / Juu - TZS)</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-3"
-                      keyboardType="numeric"
-                      value={String(settings.socialFundMax)}
-                      onChangeText={(v) => setSettings({ ...settings, socialFundMax: v.replace(/[^0-9]/g, '') })}
-                    />
-                    <TouchableOpacity onPress={handleSaveSettings} className="bg-teal-700 p-3.5 rounded-xl items-center">
-                      <Text className="text-white font-bold">Hifadhi Sheria za Hisa & Jamii</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* Kitufe 5: Sheria za Papo (Lazima & Hiari) */}
-                <TouchableOpacity
-                  onPress={() => toggleSection('PAPO_RULES')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 mb-2 flex-row justify-between items-center"
-                >
-                  <View className="flex-row items-center gap-3">
-                    <Ionicons name="flash-outline" size={20} color="#0f766e" />
-                    <Text className="font-bold text-slate-800">Sheria za Papo (Lazima & Hiari)</Text>
-                  </View>
-                  <Ionicons name={openSection === 'PAPO_RULES' ? 'chevron-up' : 'chevron-down'} size={20} color="#64748b" />
-                </TouchableOpacity>
-
-                {openSection === 'PAPO_RULES' && (
-                  <View className="bg-white p-4 rounded-2xl border border-teal-200 mb-3">
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Riba ya Papo Kila Kikao (%)</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.papoMeetingInterest)}
-                      onChangeText={(v) => setSettings({ ...settings, papoMeetingInterest: v.replace(/[^0-9]/g, '') })}
-                    />
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Kiwango cha Chini Papo ya Hiari (TZS)</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.minTopUpPapoCap)}
-                      onChangeText={(v) => setSettings({ ...settings, minTopUpPapoCap: v.replace(/[^0-9]/g, '') })}
-                    />
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Ukomo wa Juu Papo ya Hiari (TZS)</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.maxTopUpPapoCap)}
-                      onChangeText={(v) => setSettings({ ...settings, maxTopUpPapoCap: v.replace(/[^0-9]/g, '') })}
-                    />
-                    <Text className="text-xs font-bold text-slate-700 mb-1">Muda wa Kurejesha Papo ya Hiari (Majuma)</Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-3"
-                      keyboardType="numeric"
-                      value={String(settings.topUpPapoWeeks)}
-                      onChangeText={(v) => setSettings({ ...settings, topUpPapoWeeks: v.replace(/[^0-9]/g, '') })}
-                    />
-                    <TouchableOpacity onPress={handleSaveSettings} className="bg-teal-700 p-3.5 rounded-xl items-center">
-                      <Text className="text-white font-bold">Hifadhi Sheria za Papo</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* Kitufe 6: Sheria za Mkopo Mkubwa (Kipekee) */}
-                <TouchableOpacity
-                  onPress={() => toggleSection('BIG_LOAN_RULES')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 mb-2 flex-row justify-between items-center"
-                >
-                  <View className="flex-row items-center gap-3">
-                    <Ionicons name="cash-outline" size={20} color="#0f766e" />
-                    <Text className="font-bold text-slate-800">Sheria za Mkopo Mkubwa</Text>
-                  </View>
-                  <Ionicons name={openSection === 'BIG_LOAN_RULES' ? 'chevron-up' : 'chevron-down'} size={20} color="#64748b" />
-                </TouchableOpacity>
-
-                {openSection === 'BIG_LOAN_RULES' && (
-                  <View className="bg-white p-4 rounded-2xl border border-teal-200 mb-3">
-                    <Text className="text-xs font-bold text-slate-700 mb-1">
-                      Kiwango cha Mkopo (Mara Ngapi ya Hisa za Mwanachama, mf. 2 au 3)
+                  <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                    <Text className={`text-xs ${textSub}`}>Thamani ya Hisa Moja:</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>
+                      TZS {Number(group?.shareValue || 0).toLocaleString()}
                     </Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.loanLimitMultiplier)}
-                      onChangeText={(v) => setSettings({ ...settings, loanLimitMultiplier: v.replace(/[^0-9]/g, '') })}
-                    />
-
-                    <Text className="text-xs font-bold text-slate-700 mb-1">
-                      Kikomo cha Juu cha Mkopo Mkubwa (TZS - Weka 0 kama hakina ukomo)
+                  </View>
+                  <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                    <Text className={`text-xs ${textSub}`}>Hisa kwa Kikao (Chini - Juu):</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>
+                      Hisa {group?.minSharesPerMeeting} - {group?.maxSharesPerMeeting}
                     </Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.maxBigLoanCap)}
-                      onChangeText={(v) => setSettings({ ...settings, maxBigLoanCap: v.replace(/[^0-9]/g, '') })}
-                    />
-
-                    <Text className="text-xs font-bold text-slate-700 mb-1">
-                      Muda wa Kurejesha Mkopo Mkubwa (Miezi Mingapi, mf. 3 au 6)
+                  </View>
+                  <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                    <Text className={`text-xs ${textSub}`}>Mfuko wa Jamii kwa Kikao:</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>
+                      TZS {Number(group?.socialFundMin || 0).toLocaleString()} - {Number(group?.socialFundMax || 0).toLocaleString()}
                     </Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.maxRepaymentMonths)}
-                      onChangeText={(v) => setSettings({ ...settings, maxRepaymentMonths: v.replace(/[^0-9]/g, '') })}
-                    />
-
-                    <Text className="text-xs font-bold text-slate-700 mb-1">
-                      Riba ya Mkopo Mkubwa Kila Mwezi Husika (%)
+                  </View>
+                                    <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                    <Text className={`text-xs ${textSub}`}>Papo ya Lazima & Riba ya Kikao:</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>
+                      {group?.hasPapo
+                        ? `Imewashwa (TZS ${Number(group?.mandatoryPapoAmount || 0).toLocaleString()} • ${group?.papoMeetingInterest || 0}%)`
+                        : 'Imezimwa'}
                     </Text>
-                    <TextInput
-                      className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 mb-2"
-                      keyboardType="numeric"
-                      value={String(settings.interestRate)}
-                      onChangeText={(v) => setSettings({ ...settings, interestRate: v.replace(/[^0-9]/g, '') })}
-                    />
+                  </View>
 
-                    <View className="flex-row justify-between items-center py-2 mb-3">
-                      <Text className="text-xs font-bold text-slate-700">Lazima Mkopaji Awe na Mdhamini</Text>
-                      <Switch
-                        value={Boolean(settings.requireGuarantor)}
-                        onValueChange={(v) => setSettings({ ...settings, requireGuarantor: v })}
+                  <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                    <Text className={`text-xs ${textSub}`}>Papo ya Hiari (Top-Up):</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>
+                      {group?.allowTopUpPapo
+                        ? `Imeruhusiwa (TZS ${Number(group?.minTopUpPapoCap || 0).toLocaleString()} - ${Number(group?.maxTopUpPapoCap || 0).toLocaleString()} • Majuma ${group?.topUpPapoWeeks})`
+                        : 'Imezimwa'}
+                    </Text>
+                  </View>
+
+                  <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                    <Text className={`text-xs ${textSub}`}>Papo ya Hiari (Kiwango & Muda):</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>
+                      TZS {Number(group?.minTopUpPapoCap || 0).toLocaleString()} - {Number(group?.maxTopUpPapoCap || 0).toLocaleString()} (Majuma {group?.topUpPapoWeeks})
+                    </Text>
+                  </View>
+                  <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                    <Text className={`text-xs ${textSub}`}>Riba ya Mkopo Mkubwa & Muda:</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>
+                      {group?.interestRate || 10}% (Miezi {group?.maxRepaymentMonths})
+                    </Text>
+                  </View>
+                  <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                    <Text className={`text-xs ${textSub}`}>Kiwango cha Mkopo (Mara ya Hisa):</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>
+                      Mara {group?.loanLimitMultiplier || 3} (Ukomo: TZS {Number(group?.maxBigLoanCap || 0).toLocaleString()})
+                    </Text>
+                  </View>
+                  <View className="flex-row justify-between pt-1.5">
+                    <Text className={`text-xs ${textSub}`}>Mdhamini Kwenye Mkopo:</Text>
+                    <Text className={`text-xs font-bold ${textMain}`}>
+                      {group?.requireGuarantor ? 'Ni Lazima' : 'Si Lazima'}
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <View className="space-y-2.5">
+                  <Text className={`text-xs font-bold ${textSub}`}>Jina la Kikundi:</Text>
+                  <TextInput
+                    className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                    value={String(rulesForm.name || '')}
+                    onChangeText={(t) => setRulesForm({ ...rulesForm, name: t })}
+                  />
+
+                  <Text className={`text-xs font-bold ${textSub}`}>Tangazo la Kikundi (Dashboard):</Text>
+                  <TextInput
+                    multiline
+                    className={`border rounded-xl p-2.5 text-xs ${inputClass}`}
+                    value={String(rulesForm.announcement || '')}
+                    onChangeText={(t) => setRulesForm({ ...rulesForm, announcement: t })}
+                  />
+
+                  <Text className={`text-xs font-bold ${textSub}`}>Mahali pa Kikao & Saa:</Text>
+                  <View className="flex-row gap-2">
+                    <TextInput
+                      placeholder="Mahali"
+                      className={`flex-1 border rounded-xl p-2.5 text-xs ${inputClass}`}
+                      value={String(rulesForm.meetingVenue || '')}
+                      onChangeText={(t) => setRulesForm({ ...rulesForm, meetingVenue: t })}
+                    />
+                    <TextInput
+                      placeholder="Saa (16:00)"
+                      className={`w-28 border rounded-xl p-2.5 text-xs ${inputClass}`}
+                      value={String(rulesForm.meetingTime || '')}
+                      onChangeText={(t) => setRulesForm({ ...rulesForm, meetingTime: t })}
+                    />
+                  </View>
+
+                  <Text className={`text-xs font-bold ${textSub}`}>Thamani ya Hisa Moja (TZS):</Text>
+                  <TextInput
+                    keyboardType="numeric"
+                    className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                    value={String(rulesForm.shareValue ?? '')}
+                    onChangeText={(t) => setRulesForm({ ...rulesForm, shareValue: t.replace(/[^0-9]/g, '') })}
+                  />
+
+                  <View className="flex-row gap-2">
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Hisa Chini:</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.minSharesPerMeeting ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, minSharesPerMeeting: t.replace(/[^0-9]/g, '') })}
                       />
                     </View>
-
-                    <TouchableOpacity onPress={handleSaveSettings} className="bg-teal-700 p-3.5 rounded-xl items-center">
-                      <Text className="text-white font-bold">Hifadhi Sheria za Mkopo Mkubwa</Text>
-                    </TouchableOpacity>
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Hisa Juu:</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.maxSharesPerMeeting ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, maxSharesPerMeeting: t.replace(/[^0-9]/g, '') })}
+                      />
+                    </View>
                   </View>
-                )}
 
-                {/* Kitufe 7: Viwango vya Faini Zote 9 */}
+                  <View className="flex-row gap-2">
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Jamii Chini (TZS):</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.socialFundMin ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, socialFundMin: t.replace(/[^0-9]/g, '') })}
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Jamii Juu (TZS):</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.socialFundMax ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, socialFundMax: t.replace(/[^0-9]/g, '') })}
+                      />
+                    </View>
+                  </View>
+
+                                    <View className="flex-row justify-between items-center py-1">
+                    <Text className={`text-xs font-bold ${textMain}`}>Washa Mfuko wa Papo (Papo ya Lazima)?</Text>
+                    <Switch
+                      value={Boolean(rulesForm.hasPapo)}
+                      onValueChange={(v) => setRulesForm({ ...rulesForm, hasPapo: v })}
+                    />
+                  </View>
+
+                  {Boolean(rulesForm.hasPapo) && (
+                    <View>
+                      <Text className={`text-xs font-bold mb-1 ${textSub}`}>Kiasi cha Papo ya Lazima (TZS):</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.mandatoryPapoAmount ?? '')}
+                        onChangeText={(t) =>
+                          setRulesForm({ ...rulesForm, mandatoryPapoAmount: t.replace(/[^0-9]/g, '') })
+                        }
+                      />
+                    </View>
+                  )}
+
+                  <View className="flex-row justify-between items-center py-1">
+                    <Text className={`text-xs font-bold ${textMain}`}>Ruhusu Papo ya Hiari (Top-Up)?</Text>
+                    <Switch
+                      value={Boolean(rulesForm.allowTopUpPapo)}
+                      onValueChange={(v) => setRulesForm({ ...rulesForm, allowTopUpPapo: v })}
+                    />
+                  </View>
+
+                  <View className="flex-row gap-2">
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Riba ya Papo (%):</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.papoMeetingInterest ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, papoMeetingInterest: t.replace(/[^0-9.]/g, '') })}
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Majuma Papo Hiari:</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.topUpPapoWeeks ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, topUpPapoWeeks: t.replace(/[^0-9]/g, '') })}
+                      />
+                    </View>
+                  </View>
+
+                  <View className="flex-row gap-2">
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Papo Hiari Chini:</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.minTopUpPapoCap ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, minTopUpPapoCap: t.replace(/[^0-9]/g, '') })}
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Papo Hiari Juu:</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.maxTopUpPapoCap ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, maxTopUpPapoCap: t.replace(/[^0-9]/g, '') })}
+                      />
+                    </View>
+                  </View>
+
+                  <View className="flex-row gap-2">
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Riba Mkopo (%):</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.interestRate ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, interestRate: t.replace(/[^0-9.]/g, '') })}
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Miezi ya Mkopo:</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.maxRepaymentMonths ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, maxRepaymentMonths: t.replace(/[^0-9]/g, '') })}
+                      />
+                    </View>
+                  </View>
+
+                  <View className="flex-row gap-2">
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Mara ya Hisa (Mkopo):</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.loanLimitMultiplier ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, loanLimitMultiplier: t.replace(/[^0-9.]/g, '') })}
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text className={`text-xs font-bold ${textSub}`}>Ukomo Mkopo (TZS):</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
+                        value={String(rulesForm.maxBigLoanCap ?? '')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, maxBigLoanCap: t.replace(/[^0-9]/g, '') })}
+                      />
+                    </View>
+                  </View>
+
+                  <View className="flex-row justify-between items-center py-1">
+                    <Text className={`text-xs font-bold ${textMain}`}>Lazima Mdhamini Kwenye Mkopo?</Text>
+                    <Switch
+                      value={Boolean(rulesForm.requireGuarantor)}
+                      onValueChange={(v) => setRulesForm({ ...rulesForm, requireGuarantor: v })}
+                    />
+                  </View>
+
+                  <Text className="text-xs font-extrabold text-rose-600 uppercase pt-2">
+                    Hariri Kiasi cha Faini Zote (TZS):
+                  </Text>
+                  {[
+                    { key: 'latePenalty', label: '1. Kuchelewa Kikaoni' },
+                    { key: 'absentPenalty', label: '2. Kutofika Kikaoni' },
+                    { key: 'noSharePenalty', label: '3. Kutonunua Hisa' },
+                    { key: 'noSocialFundPenalty', label: '4. Kutotoa Mfuko wa Jamii' },
+                    { key: 'noPapoInterestPenalty', label: '5. Kutotoa Riba ya Papo' },
+                    { key: 'lateTopUpPenalty', label: '6. Kuchelewesha Papo Hiari' },
+                    { key: 'lateLoanInterestPenalty', label: '7. Kuchelewesha Riba Mkopo' },
+                    { key: 'disciplinePenalty', label: '8. Utovu wa Nidhamu' },
+                    { key: 'otherPenalty', label: '9. Faini Nyinginezo' },
+                  ].map((fn) => (
+                    <View key={fn.key} className="flex-row justify-between items-center py-1">
+                      <Text className={`text-xs flex-1 ${textSub}`}>{fn.label}:</Text>
+                      <TextInput
+                        keyboardType="numeric"
+                        className={`w-32 border rounded-xl p-2 text-xs font-bold text-right ${inputClass}`}
+                        value={String(rulesForm[fn.key] ?? '0')}
+                        onChangeText={(t) => setRulesForm({ ...rulesForm, [fn.key]: t.replace(/[^0-9]/g, '') })}
+                      />
+                    </View>
+                  ))}
+
+                  <TouchableOpacity
+                    onPress={handleSaveRules}
+                    disabled={saving}
+                    className="bg-teal-700 p-3.5 rounded-xl items-center mt-3"
+                  >
+                    {saving ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold text-xs">Hifadhi Sheria Zote</Text>}
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+            <View className={`p-4 rounded-2xl border mb-4 ${cardClass}`}>
+              <Text className="text-xs font-extrabold text-rose-600 uppercase mb-2.5">
+                Orodha ya Faini Zote za Kikundi
+              </Text>
+              {[
+                { label: '1. Kuchelewa Kikaoni', val: group?.latePenalty },
+                { label: '2. Kutofika Kikaoni', val: group?.absentPenalty },
+                { label: '3. Kutonunua Hisa', val: group?.noSharePenalty },
+                { label: '4. Kutotoa Mfuko wa Jamii', val: group?.noSocialFundPenalty },
+                { label: '5. Kutotoa Riba ya Papo', val: group?.noPapoInterestPenalty },
+                { label: '6. Kuchelewesha Papo ya Hiari', val: group?.lateTopUpPenalty },
+                { label: '7. Kuchelewesha Riba ya Mkopo', val: group?.lateLoanInterestPenalty },
+                { label: '8. Utovu wa Nidhamu', val: group?.disciplinePenalty },
+                { label: '9. Faini Nyinginezo', val: group?.otherPenalty },
+              ].map((item, idx) => (
+                <View key={idx} className="flex-row justify-between py-1.5 border-b border-slate-200/20">
+                  <Text className={`text-xs ${textSub}`}>{item.label}:</Text>
+                  <Text className="text-xs font-bold text-rose-600">
+                    TZS {Number(item.val || 0).toLocaleString()}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+
+        {activeSection === 'CONSTITUTION' && (
+          <View className={`p-4 rounded-2xl border mb-6 ${cardClass}`}>
+            <View className="flex-row justify-between items-center mb-3">
+              <View className="flex-row items-center gap-2">
+                <Ionicons name="book" size={18} color="#0f766e" />
+                <Text className={`font-extrabold text-sm ${textMain}`}>Katiba ya Kikoba</Text>
+              </View>
+              <View className="flex-row gap-2">
                 <TouchableOpacity
-                  onPress={() => toggleSection('FINES_RULES')}
-                  className="bg-white p-4 rounded-2xl border border-slate-200 mb-2 flex-row justify-between items-center"
+                  onPress={handleShareConstitutionPdf}
+                  className="bg-indigo-600 px-3 py-1.5 rounded-xl flex-row items-center gap-1"
                 >
-                  <View className="flex-row items-center gap-3">
-                    <Ionicons name="alert-circle-outline" size={20} color="#be123c" />
-                    <Text className="font-bold text-slate-800">Viwango vya Faini Zote 9 (TZS)</Text>
-                  </View>
-                  <Ionicons name={openSection === 'FINES_RULES' ? 'chevron-up' : 'chevron-down'} size={20} color="#64748b" />
+                  <Ionicons name="share-social-outline" size={14} color="#fff" />
+                  <Text className="text-white font-bold text-xs">PDF</Text>
                 </TouchableOpacity>
+                {isChairperson && (
+                  <TouchableOpacity
+                    onPress={() => setIsEditingConstitution(!isEditingConstitution)}
+                    className="bg-teal-700 px-3 py-1.5 rounded-xl"
+                  >
+                    <Text className="text-white font-bold text-xs">
+                      {isEditingConstitution ? 'Ghairi' : 'Hariri'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
 
-                {openSection === 'FINES_RULES' && (
-                  <View className="bg-white p-4 rounded-2xl border border-rose-200 mb-3">
-                    {[
-                      { key: 'latePenalty', label: 'Faini ya Kuchelewa Kikaoni' },
-                      { key: 'absentPenalty', label: 'Faini ya Kutofika Kikaoni' },
-                      { key: 'noSharePenalty', label: 'Faini ya Kutonunua Hisa' },
-                      { key: 'noSocialFundPenalty', label: 'Faini ya Kutonunua Jamii' },
-                      { key: 'noPapoInterestPenalty', label: 'Faini ya Kutotoa Riba ya Papo' },
-                      { key: 'lateTopUpPenalty', label: 'Faini ya Kuchelewesha Papo ya Hiari' },
-                      { key: 'lateLoanInterestPenalty', label: 'Faini ya Kuchelewesha Riba ya Mkopo' },
-                      { key: 'disciplinePenalty', label: 'Faini ya Utovu wa Nidhamu' },
-                      { key: 'otherPenalty', label: 'Faini Nyinginezo' },
-                    ].map((item) => (
-                      <View key={item.key} className="mb-2">
-                        <Text className="text-xs font-bold text-slate-700 mb-1">{item.label}</Text>
-                        <TextInput
-                          className="bg-slate-50 border border-slate-300 rounded-xl p-2.5"
-                          keyboardType="numeric"
-                          value={String(settings[item.key] || 0)}
-                          onChangeText={(v) => setSettings({ ...settings, [item.key]: v.replace(/[^0-9]/g, '') })}
-                        />
-                      </View>
-                    ))}
-                    <TouchableOpacity onPress={handleSaveSettings} className="bg-rose-700 p-3.5 rounded-xl items-center mt-2">
-                      <Text className="text-white font-bold">Hifadhi Viwango vya Faini</Text>
-                    </TouchableOpacity>
+            {isChairperson && (
+              <TouchableOpacity
+                onPress={handlePickConstitutionDoc}
+                className="bg-teal-600/15 border border-teal-600/30 p-3 rounded-xl mb-3 flex-row items-center justify-center gap-2"
+              >
+                <Ionicons name="cloud-upload-outline" size={18} color="#0f766e" />
+                <Text className="text-teal-800 font-bold text-xs">
+                  Pakia Faili la Katiba (Word / Text Document)
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {isEditingConstitution ? (
+              <>
+                <TextInput
+                  multiline
+                  numberOfLines={12}
+                  textAlignVertical="top"
+                  placeholder="Andika au bandika (Paste) Katiba ya kikoba hapa..."
+                  placeholderTextColor="#94a3b8"
+                  className={`border rounded-xl p-3.5 text-xs min-h-[220px] leading-5 ${inputClass}`}
+                  value={constitutionDraft}
+                  onChangeText={setConstitutionDraft}
+                />
+                <TouchableOpacity
+                  onPress={handleSaveConstitution}
+                  disabled={saving}
+                  className="bg-teal-700 p-3.5 rounded-xl items-center mt-3"
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text className="text-white font-bold text-xs">Hifadhi Katiba ya Kikoba</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            ) : (
+              <View className="pt-1">
+                {group?.constitution ? (
+                  <Text className={`text-xs leading-5 ${textMain}`}>{group.constitution}</Text>
+                ) : (
+                  <View className="py-8 items-center">
+                    <Ionicons name="document-text-outline" size={32} color="#94a3b8" />
+                    <Text className={`text-xs mt-2 text-center ${textSub}`}>
+                      Katiba bado haijaandikwa.{' '}
+                      {isChairperson
+                        ? 'Bonyeza "Pakia Faili" au "Hariri" kuweka Katiba ya kikundi.'
+                        : 'Mwenyekiti akishaweka Katiba itaonekana hapa.'}
+                    </Text>
                   </View>
                 )}
-              </>
+              </View>
             )}
           </View>
         )}
 
-        <Text className="text-xs font-bold text-slate-500 uppercase mb-2">
-          Wanachama Hai ({members.length}) {isChair ? '• Gusa Mwanachama Kumsimamia' : ''}
-        </Text>
-        {members.map((m) => (
-          <TouchableOpacity
-            key={m.userId}
-            onPress={() => openEditMemberModal(m)}
-            disabled={!isChair}
-            className="bg-white p-4 rounded-2xl mb-2.5 border border-slate-200 flex-row justify-between items-center"
-          >
-            <View className="flex-1">
-              <Text className="font-bold text-slate-900">{m.fullName}</Text>
-              <Text className="text-xs text-slate-500">
-                {m.phone} • {getRoleLabel(m.role)}
-              </Text>
-              <Text className="text-xs text-teal-700 font-semibold mt-1">
-                Hisa: {m.totalSharesCount} (TZS {Number(m.totalSharesValue || 0).toLocaleString()})
-              </Text>
-            </View>
-            {isChair && <Ionicons name="settings-outline" size={20} color="#0f766e" />}
-          </TouchableOpacity>
-        ))}
-
-        <TouchableOpacity
-          onPress={signOut}
-          className="bg-slate-800 p-4 rounded-2xl items-center flex-row justify-center gap-2 mt-4 mb-10"
-        >
-          <Ionicons name="log-out-outline" size={20} color="#fff" />
-          <Text className="text-white font-bold">Ondoka Kwenye Akaunti (Logout)</Text>
-        </TouchableOpacity>
+        <View className="h-10" />
       </ScrollView>
 
-      <Modal visible={!!editMember} animationType="slide" transparent>
-        <View className="flex-1 bg-black/50 justify-end">
-          <View className="bg-white rounded-t-3xl p-6">
-            <View className="flex-row justify-between items-center mb-4">
-              <Text className="text-lg font-bold text-slate-900">Simamia Mwanachama</Text>
-              <TouchableOpacity onPress={() => setEditMember(null)}>
+      <Modal visible={Boolean(contactMember)} animationType="fade" transparent>
+        <View className="flex-1 bg-black/50 justify-center items-center px-6">
+          <View className="bg-white w-full rounded-3xl p-6 shadow-xl">
+            <View className="flex-row justify-between items-center mb-3">
+              <View className="bg-teal-600/15 px-3 py-1 rounded-full">
+                <Text className="text-teal-800 font-bold text-xs">
+                  {getRoleLabel(contactMember?.role || '')}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setContactMember(null)}>
                 <Ionicons name="close-circle" size={26} color="#64748b" />
               </TouchableOpacity>
             </View>
 
-            <Text className="text-xs font-bold text-slate-700 mb-1">Jina Kamili</Text>
-            <TextInput
-              className="bg-slate-50 border border-slate-300 rounded-xl p-3 mb-2"
-              value={editName}
-              onChangeText={setEditName}
-            />
-            <Text className="text-xs font-bold text-slate-700 mb-1">Namba ya Simu</Text>
-            <TextInput
-              className="bg-slate-50 border border-slate-300 rounded-xl p-3 mb-2"
-              keyboardType="numeric"
-              value={editPhone}
-              onChangeText={(t) => setEditPhone(t.replace(/[^0-9]/g, ''))}
-            />
-            <Text className="text-xs font-bold text-slate-700 mb-1">Cheo Kwenye Kikundi</Text>
-            <View className="flex-row gap-2 mb-3">
-              {['MEMBER', 'SECRETARY', 'TREASURER'].map((r) => (
-                <TouchableOpacity
-                  key={r}
-                  onPress={() => setEditRole(r)}
-                  className={`flex-1 py-2 rounded-lg border items-center ${
-                    editRole === r ? 'bg-teal-700 border-teal-700' : 'bg-slate-50 border-slate-300'
-                  }`}
-                >
-                  <Text className={`text-xs font-bold ${editRole === r ? 'text-white' : 'text-slate-700'}`}>
-                    {getRoleLabel(r)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Text className="text-lg font-extrabold text-slate-900">{contactMember?.fullName}</Text>
+            <Text className="text-sm font-bold text-teal-700 mt-0.5 mb-5">{contactMember?.phone}</Text>
 
-            <TouchableOpacity onPress={handleUpdateMember} className="bg-teal-700 p-3.5 rounded-xl items-center mb-4">
-              <Text className="text-white font-bold">Hifadhi Mabadiliko ya Taarifa</Text>
-            </TouchableOpacity>
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                onPress={() => {
+                  const m = contactMember;
+                  setContactMember(null);
+                  handleCallMember(m.phone, m.fullName);
+                }}
+                className="flex-1 bg-emerald-600 py-3.5 rounded-2xl flex-row items-center justify-center gap-2"
+              >
+                <Ionicons name="call" size={18} color="#fff" />
+                <Text className="text-white font-bold text-xs">Piga Simu</Text>
+              </TouchableOpacity>
 
-            <View className="border-t border-slate-200 pt-4">
-              <Text className="text-xs font-bold text-rose-800 mb-1">
-                Anzisha Kura ya Kusitisha Uanachama (Nusu ya Kura Itathibitisha)
-              </Text>
-              <TextInput
-                className="bg-rose-50 border border-rose-200 rounded-xl p-3 mb-2 text-slate-900"
-                placeholder="Andika sababu ya kusitisha uanachama..."
-                value={terminateReason}
-                onChangeText={setTerminateReason}
-              />
-              <TouchableOpacity onPress={handleInitiateTermination} className="bg-rose-700 p-3.5 rounded-xl items-center">
-                <Text className="text-white font-bold">Anzisha Kura ya Kumwondoa</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  const m = contactMember;
+                  setContactMember(null);
+                  handleSmsMember(m.phone, m.fullName);
+                }}
+                className="flex-1 bg-indigo-600 py-3.5 rounded-2xl flex-row items-center justify-center gap-2"
+              >
+                <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
+                <Text className="text-white font-bold text-xs">Tuma Message</Text>
               </TouchableOpacity>
             </View>
           </View>
