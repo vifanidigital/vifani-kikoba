@@ -37,6 +37,9 @@ model Group {
   name                String
   groupType           String   @default("KIKOBA")
   announcement        String?
+  announcementPublishedAt DateTime?
+  announcementExpiresAt   DateTime?
+  announcementUpdatedAt   DateTime?
   constitution      String?
   meetingDayOfWeek    Int      @default(4)
   meetingTime         String   @default("16:00")
@@ -228,7 +231,11 @@ model Transaction {
   type      String
   amount    Float
   notes     String?
+  interestLoanId String?
+  interestDueAt DateTime?
   createdAt DateTime @default(now())
+
+  @@index([groupId, type, createdAt])
 }
 
 model LoanAnnouncementAck {

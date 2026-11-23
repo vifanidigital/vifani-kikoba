@@ -1,9 +1,10 @@
-import axios from 'axios';
+import { create } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const API_URL = 'https://onrender.com';
+export const SESSION_TOKEN_KEY = 'vifani_token';
+export const API_URL = (process.env.EXPO_PUBLIC_API_URL?.trim() || 'https://vifani-kikoba.onrender.com/api').replace(/\/+$/, '');
 
-export const apiClient = axios.create({
+export const apiClient = create({
   baseURL: API_URL,
   timeout: 45000,
   headers: {
@@ -12,10 +13,9 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use(async (config) => {
-  const token =
-    (await AsyncStorage.getItem('userToken')) ||
-    (await AsyncStorage.getItem('token')) ||
-    (await AsyncStorage.getItem('@vifani_token'));
+  // A retry must keep the group session used by the original request.
+  if (config.headers.has('Authorization')) return config;
+  const token = await AsyncStorage.getItem(SESSION_TOKEN_KEY);
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -27,7 +27,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const config = error.config;
-    if (!config || config.method?.toLowerCase() !== 'get' || config._retryCount >= 1) {
+    if (!config || config.signal?.aborted || config.method?.toLowerCase() !== 'get' || config._retryCount >= 1) {
       return Promise.reject(error);
     }
     const isNetworkOrTimeout = !error.response || error.code === 'ECONNABORTED';

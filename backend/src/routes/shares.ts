@@ -1,3 +1,4 @@
+import { interestTiming } from '../lib/loanInterest';
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
@@ -21,7 +22,8 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
       unpaidFines,
       allLoans,
       allTopUps,
-      membersProfit,
+      interestLedger,
+      periodicPapo,
       allExpenses,
       todayShares,
       todayTransactions,
@@ -40,7 +42,8 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
       prisma.fineRecord.aggregate({ where: { groupId, isPaid: false }, _sum: { amount: true } }),
       prisma.loan.findMany({ where: { groupId } }),
       prisma.papoTopUp.findMany({ where: { groupId } }),
-      prisma.groupMember.aggregate({ where: { groupId, isActive: true }, _sum: { memberInterestProfit: true } }),
+      prisma.transaction.findMany({ where: { groupId, type: 'LOAN_INTEREST_REPAYMENT' } }),
+      prisma.transaction.aggregate({ where: { groupId, type: 'PAPO_INTEREST' }, _sum: { amount: true } }),
       prisma.groupExpense.aggregate({ where: { groupId }, _sum: { amount: true } }),
       prisma.shareRecord.aggregate({ where: { groupId, meetingDate: { gte: startOfToday } }, _sum: { amountPaid: true, socialFundPaid: true } }),
       prisma.transaction.findMany({ where: { groupId, createdAt: { gte: startOfToday } } }),
@@ -60,7 +63,7 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
     const totalUnpaidFines = unpaidFines._sum.amount || 0;
     const totalGroupExpenses = allExpenses._sum.amount || 0;
 
-    const memberShareableLoanProfit = membersProfit._sum.memberInterestProfit || 0;
+    const memberShareableLoanProfit = interestLedger.filter(row => interestTiming(row) === 'ON_TIME').reduce((sum, row) => sum + row.amount, 0);
     let totalLoanInterestCollected = 0;
     let loansPrincipalOut = 0;
 
@@ -72,9 +75,9 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
       }
     }
 
-    const groupRetainedLoanProfit = Math.max(0, totalLoanInterestCollected - memberShareableLoanProfit);
+    const groupRetainedLoanProfit = interestLedger.filter(row => interestTiming(row) === 'LATE').reduce((sum, row) => sum + row.amount, 0);
 
-    let papoInterestCollected = 0;
+    let papoInterestCollected = periodicPapo._sum.amount ?? 0;
     let papoTopUpOut = 0;
     for (const t of allTopUps) {
       const interestPart = Math.max(0, (t.totalPayable || 0) - (t.principalAmount || 0));
@@ -137,6 +140,7 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
         totalSocialFund,
         memberShareableLoanProfit,
         groupRetainedLoanProfit,
+        unclassifiedLoanInterest: Math.max(0, totalLoanInterestCollected - memberShareableLoanProfit - groupRetainedLoanProfit),
         papoInterestCollected,
         totalPaidFines,
         totalUnpaidFines,

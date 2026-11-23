@@ -53,7 +53,8 @@ router.get('/status', authenticateToken, async (req: AuthRequest, res: Response)
     const combinedMeetingInterest = mandatoryMeetingInterest + activeTopUpTotalInterest;
 
     const maxCap = group.maxTopUpPapoCap || 0;
-    const remainingTopUpCap = Math.max(0, maxCap - activeTopUpPrincipal);
+    const pendingPrincipal = myTopUps.filter((t) => t.status === 'PENDING').reduce((sum, t) => sum + t.principalAmount, 0);
+    const remainingTopUpCap = Math.max(0, maxCap - activeTopUpPrincipal - pendingPrincipal);
 
     const now = Date.now();
     const msPerWeek = 7 * 24 * 60 * 60 * 1000;
@@ -108,7 +109,7 @@ router.post('/request-topup', authenticateToken, async (req: AuthRequest, res: R
       return res.status(400).json({ error: 'Papo ya hiari haijawashwa kwenye kikoba hiki.' });
     }
 
-    if (!amount || amount < group.minTopUpPapoCap) {
+    if (!Number.isFinite(amount) || amount <= 0 || amount < group.minTopUpPapoCap) {
       return res.status(400).json({
         error: `Kiasi cha chini cha Papo ya hiari ni TZS ${group.minTopUpPapoCap.toLocaleString()}.`,
       });
@@ -129,7 +130,7 @@ router.post('/request-topup', authenticateToken, async (req: AuthRequest, res: R
         groupId,
         userId,
         principalAmount: amount,
-        interestAmount,
+        interestRate: group.papoMeetingInterest,
         totalPayable: amount + interestAmount,
         status: 'PENDING',
       },
@@ -162,10 +163,13 @@ router.post('/approve-topup/:id', authenticateToken, async (req: AuthRequest, re
     // Tarehe halisi ya kurejesha = Leo + (topUpPapoWeeks * siku 7) bila juma la ziada
     const dueDate = new Date(Date.now() + (group.topUpPapoWeeks || 4) * 7 * 24 * 60 * 60 * 1000);
 
-    await prisma.papoTopUp.update({
-      where: { id },
+    const updated = await prisma.papoTopUp.updateMany({
+      where: { id, groupId, status: 'PENDING' },
       data: { status: 'ACTIVE', dueDate },
     });
+    if (updated.count === 0) {
+      return res.status(409).json({ error: 'Ombi hili halisubiri idhini tena.' });
+    }
 
     res.json({
       message: `Papo ya hiari imeidhinishwa! Siku ya kurejesha ni ${dueDate.toLocaleDateString('sw-TZ')} (Majuma ${group.topUpPapoWeeks}).`,
@@ -186,10 +190,11 @@ router.post('/request-repay-topup/:id', authenticateToken, async (req: AuthReque
       return res.status(404).json({ error: 'Rekodi ya Papo haijapatikana.' });
     }
 
-    await prisma.papoTopUp.update({
-      where: { id },
+    const requested = await prisma.papoTopUp.updateMany({
+      where: { id, groupId, userId, status: { in: ['ACTIVE', 'OVERDUE'] } },
       data: { status: 'REPAYMENT_PENDING' },
     });
+    if (!requested.count) return res.status(409).json({ error: 'Papo hii haiwezi kuombewa marejesho kwa sasa.' });
 
     res.json({ message: 'Ombi la kurejesha Papo ya hiari limetumwa kwa kiongozi kuthibitisha!' });
   } catch {
@@ -211,25 +216,29 @@ router.post('/confirm-repay-topup/:id', authenticateToken, async (req: AuthReque
       return res.status(404).json({ error: 'Rekodi haijapatikana.' });
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.papoTopUp.update({
-        where: { id },
+    const recorded = await prisma.$transaction(async (tx) => {
+      const updated = await tx.papoTopUp.updateMany({
+        where: { id, groupId, status: 'REPAYMENT_PENDING', amountPaid: topUp.amountPaid },
         data: {
           status: 'PAID',
           amountPaid: topUp.totalPayable,
         },
       });
 
-      await tx.transaction.create({
+      if (!updated.count) return false;
+      const principalRemaining = Math.max(0, topUp.principalAmount - Math.max(0, topUp.amountPaid - (topUp.totalPayable - topUp.principalAmount)));
+      if (principalRemaining > 0) await tx.transaction.create({
         data: {
           groupId,
           userId: topUp.userId,
           type: 'PAPO_TOPUP_REPAYMENT',
-          amount: topUp.principalAmount,
+          amount: principalRemaining,
           notes: 'Marejesho ya mtaji wa Papo ya hiari',
         },
       });
+      return true;
     });
+    if (!recorded) return res.status(409).json({ error: 'Papo hii haisubiri uthibitisho wa marejesho.' });
 
     res.json({ message: 'Marejesho ya Papo ya hiari yamethibitishwa na kufutwa kwenye madeni!' });
   } catch {

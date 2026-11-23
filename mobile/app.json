@@ -11,6 +11,7 @@
       "supportsTablet": true
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -34,7 +35,9 @@
     "updates": {
       "url": "https://u.expo.dev/31313226-5d2b-414c-bbab-299a12dddefb"
     },
+    "scheme": "vifani-jamii",
     "plugins": [
+      "expo-router",
       "expo-sharing"
     ]
   }

@@ -1,6 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiClient } from '../api/client';
+import { apiClient, SESSION_TOKEN_KEY } from '../api/client';
 
 export interface Group {
   id: string;
@@ -45,6 +45,8 @@ interface AuthContextType {
     memberships: Membership[],
     forcePicker?: boolean
   ) => Promise<void>;
+  updateUser: (updatedUser: User) => Promise<void>;
+  chooseGroup: () => void;
   switchGroup: (targetGroupId: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -64,7 +66,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const loadSession = async () => {
       try {
         const [savedToken, savedUser, savedGroup, savedRole, savedMemberships] = await Promise.all([
-          AsyncStorage.getItem('vifani_token'),
+          AsyncStorage.getItem(SESSION_TOKEN_KEY),
           AsyncStorage.getItem('vifani_user'),
           AsyncStorage.getItem('vifani_group'),
           AsyncStorage.getItem('vifani_role'),
@@ -72,12 +74,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ]);
 
         if (savedToken && savedUser && savedGroup) {
-          setToken(savedToken);
-          setUser(JSON.parse(savedUser));
-          setGroup(JSON.parse(savedGroup));
+          const restoredUser: User = JSON.parse(savedUser);
+          const restoredGroup: Group = JSON.parse(savedGroup);
+          const restoredMemberships = savedMemberships ? JSON.parse(savedMemberships) : [];
+          if (!restoredUser?.id || !restoredGroup?.id) return;
+          setUser(restoredUser);
+          setGroup(restoredGroup);
           setRole(savedRole);
-          if (savedMemberships) setMemberships(JSON.parse(savedMemberships));
+          setMemberships(Array.isArray(restoredMemberships) ? restoredMemberships : []);
+          setToken(savedToken);
         }
+      } catch {
+        // A failed session restore leaves the user at sign-in.
       } finally {
         setLoading(false);
       }
@@ -93,8 +101,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     userMemberships: Membership[],
     forcePicker = false
   ) => {
+    if (!newToken || !newUser?.id || !activeGroup?.id || !activeRole || !Array.isArray(userMemberships)) {
+      throw new Error('Majibu ya kuingia hayajakamilika.');
+    }
     await AsyncStorage.multiSet([
-      ['vifani_token', newToken],
+      [SESSION_TOKEN_KEY, newToken],
       ['vifani_user', JSON.stringify(newUser)],
       ['vifani_group', JSON.stringify(activeGroup)],
       ['vifani_role', activeRole],
@@ -109,12 +120,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setNeedsGroupSelection(forcePicker && userMemberships.length > 1);
   };
 
+  const updateUser = async (updatedUser: User) => {
+    await AsyncStorage.setItem('vifani_user', JSON.stringify(updatedUser));
+    setUser(updatedUser);
+  };
+
   const switchGroup = async (targetGroupId: string) => {
-    const res = await apiClient.post('/auth/switch-group', { targetGroupId });
+    if (targetGroupId === group?.id) {
+      setNeedsGroupSelection(false);
+      return;
+    }
+    const res = await apiClient.post('/auth/switch-group', { groupId: targetGroupId });
     const { token: newToken, activeGroup, activeRole } = res.data;
+    if (!newToken || activeGroup?.id !== targetGroupId || !activeRole) {
+      throw new Error('Majibu ya kubadili kikundi hayajakamilika.');
+    }
 
     await AsyncStorage.multiSet([
-      ['vifani_token', newToken],
+      [SESSION_TOKEN_KEY, newToken],
       ['vifani_group', JSON.stringify(activeGroup)],
       ['vifani_role', activeRole],
     ]);
@@ -127,7 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     await AsyncStorage.multiRemove([
-      'vifani_token',
+      SESSION_TOKEN_KEY,
       'vifani_user',
       'vifani_group',
       'vifani_role',
@@ -152,6 +175,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         needsGroupSelection,
         signIn,
+        updateUser,
+        chooseGroup: () => setNeedsGroupSelection(memberships.length > 1),
         switchGroup,
         signOut,
       }}

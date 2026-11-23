@@ -1,0 +1,77 @@
+import { z } from 'zod';
+
+const record = z.looseObject({ id: z.string() });
+const member = z.looseObject({
+  memberId: z.string(),
+  userId: z.string(),
+  fullName: z.string(),
+  phone: z.string().nullish(),
+  role: z.string(),
+  joinedAt: z.string(),
+});
+
+export const parsePapo = z.looseObject({
+  hasPapo: z.boolean(),
+  topUps: z.array(record),
+  pendingTopUpRequests: z.array(record).optional(),
+  repayingTopUpRequests: z.array(record).optional(),
+}).parse;
+
+export const parseLoans = z.looseObject({
+  loans: z.array(record),
+  interestPayments: z.array(z.object({
+    id: z.string(), userId: z.string(), fullName: z.string(),
+    amount: z.number(), paidAt: z.string(), dueAt: z.string().nullable(),
+    timing: z.enum(['ON_TIME', 'LATE', 'UNKNOWN']),
+  })).optional(),
+  guarantorRequests: z.array(record).optional(),
+  potentialGuarantors: z.array(record).optional(),
+}).parse;
+
+const equalShareOut = z.object({
+  calculation: z.literal('KIKOBA_EQUAL_V1'),
+  myEstimate: z.object({
+    fullName: z.string(), myCapital: z.number(), mySocialFund: z.number(),
+    myPapoMandatory: z.number(), myOnTimeLoanInterest: z.number(), myPapoInterestPaid: z.number(),
+    myPapoInterestRefund: z.number(), estimatedProfitDividend: z.number(),
+    totalDeductions: z.number(), netPayout: z.number(),
+  }).nullable(),
+  groupPool: z.object({
+    memberCount: z.number(), papoInterestPool: z.number(), lateLoanInterestPool: z.number(),
+    finesPool: z.number(), expenses: z.number(), totalDistributableProfit: z.number(),
+    unclassifiedLoanInterest: z.number(), expenseShortfall: z.number(),
+  }),
+});
+
+export const parseShareOut = z.union([
+  equalShareOut,
+  z.object({ calculation: z.undefined(), myEstimate: z.looseObject({ fullName: z.string().optional() }).nullable() }),
+]).parse;
+
+export const parseExpenses = z.object({
+  expenses: z.array(record.extend({
+    title: z.string(),
+    category: z.string(),
+    createdAt: z.string(),
+    beneficiary: z.string().nullish(),
+    recordedBy: z.string().nullish(),
+  })),
+}).parse;
+
+export const parseAuditLogs = z.object({
+  logs: z.array(record.extend({
+    summary: z.string(),
+    changedBy: z.string(),
+    createdAt: z.string(),
+  })),
+}).parse;
+
+export const parseOffice = z.object({
+  group: record.extend({
+    name: z.string(),
+    constitution: z.string().nullish(),
+    meetingVenue: z.string().nullish(),
+    meetingTime: z.string().nullish(),
+  }),
+  directory: z.array(member),
+}).parse;

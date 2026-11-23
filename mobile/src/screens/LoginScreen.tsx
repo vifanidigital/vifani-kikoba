@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { router } from 'expo-router';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,8 +10,13 @@ import {
   ScrollView,
   Linking,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
+  Animated,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Application from 'expo-application';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,21 +24,61 @@ import { Ionicons, FontAwesome5, FontAwesome6 } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
-export default function LoginScreen({ navigation }: any) {
-  useEffect(() => {
-    apiClient.get('/health').catch(() => {});
-  }, []);
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
+export default function LoginScreen() {
+  const insets = useSafeAreaInsets();
   const { signIn } = useAuth();
+
+  const [serverReady, setServerReady] = useState<'WARMING' | 'ONLINE' | 'OFFLINE'>('WARMING');
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
   const [otp, setOtp] = useState('');
   const [newPin, setNewPin] = useState('');
+  const [showNewPin, setShowNewPin] = useState(false);
   const [mode, setMode] = useState<'LOGIN' | 'OTP' | 'FORGOT' | 'RESET'>('LOGIN');
   const [loading, setLoading] = useState(false);
   const [hasSavedBiometrics, setHasSavedBiometrics] = useState(false);
   const [showSocials, setShowSocials] = useState(false);
+  const loginScroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
+
+  const [fadeAnim] = useState(() => new Animated.Value(0));
+  const [slideAnim] = useState(() => new Animated.Value(20));
+
+  const checkBiometricAvailability = useCallback(async () => {
+    try {
+      const compatible = await LocalAuthentication.hasHardwareAsync();
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      const savedCreds = await AsyncStorage.getItem('vifani_bio_creds');
+      if (compatible && enrolled && savedCreds) {
+        setHasSavedBiometrics(true);
+      }
+    } catch {
+      setHasSavedBiometrics(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 480, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 480, useNativeDriver: true }),
+    ]).start();
+
+    apiClient
+      .get('/health')
+      .then(() => setServerReady('ONLINE'))
+      .catch(() => setServerReady('OFFLINE'));
+
+    void Promise.resolve().then(checkBiometricAvailability);
+  }, [fadeAnim, slideAnim, checkBiometricAvailability]);
+
+  const switchMode = (nextMode: 'LOGIN' | 'OTP' | 'FORGOT' | 'RESET') => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setMode(nextMode);
+  };
 
   const onlyDigits = (text: string) => text.replace(/[^0-9]/g, '');
   const handlePhoneChange = (text: string) => setPhone(onlyDigits(text));
@@ -43,24 +89,11 @@ export default function LoginScreen({ navigation }: any) {
   const isValidTzPhone = (p: string) => /^(0[67]\d{8}|255[67]\d{8})$/.test(p);
   const isValidPin = (p: string) => /^\d{4,6}$/.test(p);
   const isLoginReady = isValidTzPhone(phone) && isValidPin(pin) && !loading;
-  useEffect(() => {
-    checkBiometricAvailability();
-  }, []);
-
   const getDeviceId = async () => {
     try {
       return Application.getAndroidId() || 'device-default-id';
     } catch {
       return 'device-default-id';
-    }
-  };
-
-  const checkBiometricAvailability = async () => {
-    const compatible = await LocalAuthentication.hasHardwareAsync();
-    const enrolled = await LocalAuthentication.isEnrolledAsync();
-    const savedCreds = await AsyncStorage.getItem('vifani_bio_creds');
-    if (compatible && enrolled && savedCreds) {
-      setHasSavedBiometrics(true);
     }
   };
 
@@ -103,11 +136,12 @@ export default function LoginScreen({ navigation }: any) {
         deviceId,
       });
 
+      setServerReady('ONLINE');
       const data = res.data;
 
       if (res.status === 202 && data?.requireOtp) {
-        Alert.alert('Uhakiki wa Simu Mpya', `${data.message}\n(Kodi ya Majaribio: ${data.devOtp})`);
-        setMode('OTP');
+        Alert.alert('Uhakiki wa Simu Mpya', `${data.message}`);
+        switchMode('OTP');
         return;
       }
 
@@ -123,6 +157,7 @@ export default function LoginScreen({ navigation }: any) {
       setLoading(false);
     }
   };
+
   const handleVerifyOtp = async () => {
     if (!/^\d{6}$/.test(otp)) {
       return Alert.alert('OTP Si Sahihi', 'Weka kodi ya OTP yenye tarakimu 6 pekee.');
@@ -148,10 +183,10 @@ export default function LoginScreen({ navigation }: any) {
     try {
       const res = await apiClient.post('/auth/forgot-pin', { phone });
       const data = res.data;
-      Alert.alert('OTP Imetumwa', `${data.message}\n(Kodi ya Majaribio: ${data.devOtp})`);
-      setMode('RESET');
+      Alert.alert('OTP Imetumwa', `${data.message}`);
+      switchMode('RESET');
     } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Namba haijapatikana.');
+      Alert.alert('Hitilafu', error.response?.data?.error || 'Huduma ya kurejesha PIN haipatikani kwa sasa. Wasiliana na uongozi wa kikundi.');
     } finally {
       setLoading(false);
     }
@@ -168,7 +203,7 @@ export default function LoginScreen({ navigation }: any) {
       setOtp('');
       setPin('');
       setNewPin('');
-      setMode('LOGIN');
+      switchMode('LOGIN');
     } catch (error: any) {
       Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kubadili PIN.');
     } finally {
@@ -178,7 +213,7 @@ export default function LoginScreen({ navigation }: any) {
 
   const openSupportWhatsApp = () => {
     const message = encodeURIComponent('Habari Vifani Digital, nahitaji msaada kuhusu mfumo wa Vifani Jamii.');
-    Linking.openURL(`https://wa.me{message}`).catch(() =>
+    Linking.openURL(`https://wa.me/?text=${message}`).catch(() =>
       Alert.alert('Msaada', 'Imeshindwa kufungua WhatsApp kwenye simu hii.')
     );
   };
@@ -188,12 +223,21 @@ export default function LoginScreen({ navigation }: any) {
   };
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       className="flex-1 bg-slate-950"
     >
-      <ScrollView contentContainerClassName="flex-grow pb-10" keyboardShouldPersistTaps="handled">
-        {/* Header ya Kisasa yenye Mvuto (Dark Emerald & Gold Accent) */}
-        <View className="bg-teal-900 pt-14 pb-20 px-6 rounded-b-[42px] items-center border-b border-teal-700/50">
+      <ScrollView
+        ref={loginScroll}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 24, 40) }}
+        contentContainerClassName="flex-grow"
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header ya Kisasa */}
+        <View
+          style={{ paddingTop: Math.max(insets.top + 16, 52) }}
+          className="bg-teal-900 pb-20 px-6 rounded-b-[42px] items-center border-b border-teal-700/50"
+        >
           <View className="w-16 h-16 bg-teal-500/20 rounded-2xl items-center justify-center mb-3 border border-teal-400/40">
             <Ionicons name="shield-checkmark" size={32} color="#5eead4" />
           </View>
@@ -203,10 +247,25 @@ export default function LoginScreen({ navigation }: any) {
           <Text className="text-xs text-teal-200 mt-1.5 text-center font-medium px-4">
             Jukwaa la Kisasa la Vikoba • Michezo • Akiba & Mifuko ya Jamii
           </Text>
+
+          {/* Kiashiria cha Hali ya Mtandao */}
+          <View className="flex-row items-center gap-1.5 mt-3 bg-teal-950/70 px-3 py-1 rounded-full border border-teal-700/50">
+            <View
+              className={`w-2 h-2 rounded-full ${
+                serverReady === 'ONLINE' ? 'bg-emerald-400' : 'bg-amber-400'
+              }`}
+            />
+            <Text className="text-[10px] font-bold text-teal-100">
+              {serverReady === 'ONLINE' ? 'Mfumo Uko Tayari' : serverReady === 'OFFLINE' ? 'Muunganisho haupatikani' : 'Inaandaa muunganisho...'}
+            </Text>
+          </View>
         </View>
 
         {/* Kadi Kuu Inayoelea */}
-        <View className="mx-5 -mt-12 bg-white p-6 rounded-3xl shadow-xl border border-slate-100">
+        <Animated.View
+          style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
+          className="mx-5 -mt-12 bg-white p-6 rounded-3xl shadow-xl border border-slate-100"
+        >
           {mode === 'LOGIN' && (
             <>
               <Text className="text-lg font-extrabold text-slate-900 mb-1">Karibu Tena</Text>
@@ -228,6 +287,11 @@ export default function LoginScreen({ navigation }: any) {
                   value={phone}
                   onChangeText={handlePhoneChange}
                 />
+                {phone.length > 0 && (
+                  <TouchableOpacity onPress={() => setPhone('')}>
+                    <Ionicons name="close-circle" size={18} color="#94a3b8" />
+                  </TouchableOpacity>
+                )}
               </View>
 
               <Text className="text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
@@ -245,12 +309,18 @@ export default function LoginScreen({ navigation }: any) {
                   value={pin}
                   onChangeText={handlePinChange}
                 />
-                <TouchableOpacity onPress={() => setShowPin(!showPin)} className="p-1.5">
-                  <Ionicons name={showPin ? 'eye-off-outline' : 'eye-outline'} size={22} color="#64748b" />
+                <TouchableOpacity
+                  onPress={() => setShowPin(!showPin)}
+                  className="flex-row items-center gap-1 bg-slate-200/70 px-2.5 py-1.5 rounded-xl"
+                >
+                  <Ionicons name={showPin ? 'eye-off-outline' : 'eye-outline'} size={18} color="#0f766e" />
+                  <Text className="text-[10px] font-bold text-slate-700">
+                    {showPin ? 'Ficha' : 'Ona'}
+                  </Text>
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity onPress={() => setMode('FORGOT')} className="self-end mb-6">
+              <TouchableOpacity onPress={() => Alert.alert('Umesahau PIN?', 'Wasiliana na uongozi wa kikundi au tumia Msaada wa Haraka. Urejeshaji wa PIN kwa SMS bado haujaunganishwa.')} className="self-end mb-6">
                 <Text className="text-teal-700 font-bold text-xs">Umesahau PIN?</Text>
               </TouchableOpacity>
 
@@ -287,7 +357,7 @@ export default function LoginScreen({ navigation }: any) {
               <View className="mt-6 pt-5 border-t border-slate-100 items-center">
                 <Text className="text-slate-500 text-xs mb-2">Huna kikundi kilichosajiliwa bado?</Text>
                 <TouchableOpacity
-                  onPress={() => navigation.navigate('RegisterGroup')}
+                  onPress={() => router.push('/register')}
                   className="bg-slate-900 px-5 py-3 rounded-xl flex-row items-center gap-2"
                 >
                   <Ionicons name="add-circle-outline" size={18} color="#5eead4" />
@@ -298,7 +368,10 @@ export default function LoginScreen({ navigation }: any) {
           )}
           {mode === 'OTP' && (
             <>
-              <Text className="text-sm font-bold text-slate-800 mb-1.5">Kodi ya Uthibitisho (OTP)</Text>
+              <Text className="text-lg font-extrabold text-slate-900 mb-1">Thibitisha Simu Mpya</Text>
+              <Text className="text-xs text-slate-500 mb-4">
+                Ingiza kodi ya OTP yenye tarakimu 6 iliyotumwa kwenda {phone}
+              </Text>
               <TextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-center text-xl font-bold tracking-widest text-slate-900"
                 placeholder="000000"
@@ -308,20 +381,26 @@ export default function LoginScreen({ navigation }: any) {
                 onChangeText={handleOtpChange}
               />
               <TouchableOpacity
-                className="bg-teal-700 p-4 rounded-2xl items-center"
+                className="bg-teal-700 p-4 rounded-2xl items-center mb-3"
                 onPress={handleVerifyOtp}
                 disabled={loading}
               >
                 {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Thibitisha Simu</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => switchMode('LOGIN')} className="items-center py-1">
+                <Text className="text-slate-500 font-bold text-xs">Rudi Nyuma</Text>
               </TouchableOpacity>
             </>
           )}
 
           {mode === 'FORGOT' && (
             <>
-              <Text className="text-sm font-bold text-slate-800 mb-1.5">Namba ya Simu Iliyosajiliwa</Text>
+              <Text className="text-lg font-extrabold text-slate-900 mb-1">Rejesha PIN Yako</Text>
+              <Text className="text-xs text-slate-500 mb-4">
+                Weka namba yako ya simu iliyosajiliwa kupokea kodi ya kubadili PIN
+              </Text>
               <TextInput
-                className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-base text-slate-900"
+                className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-base font-semibold text-slate-900"
                 placeholder="Mf. 0712345678"
                 keyboardType="numeric"
                 maxLength={12}
@@ -335,7 +414,7 @@ export default function LoginScreen({ navigation }: any) {
               >
                 {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Tuma Kodi ya OTP</Text>}
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setMode('LOGIN')} className="items-center">
+              <TouchableOpacity onPress={() => switchMode('LOGIN')} className="items-center">
                 <Text className="text-slate-500 font-bold text-xs">Rudi Kwenye Kuingia</Text>
               </TouchableOpacity>
             </>
@@ -343,35 +422,56 @@ export default function LoginScreen({ navigation }: any) {
 
           {mode === 'RESET' && (
             <>
-              <Text className="text-sm font-bold text-slate-800 mb-1.5">Kodi ya OTP (Tarakimu 6)</Text>
+              <Text className="text-lg font-extrabold text-slate-900 mb-1">Weka PIN Mpya</Text>
+              <Text className="text-xs text-slate-500 mb-4">
+                Ingiza kodi ya OTP na PIN yako mpya ya siri
+              </Text>
+              <Text className="text-xs font-bold text-slate-700 mb-1.5">Kodi ya OTP (Tarakimu 6)</Text>
               <TextInput
-                className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-base text-slate-900"
+                className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-base font-bold text-slate-900 tracking-widest"
                 placeholder="000000"
                 keyboardType="numeric"
                 maxLength={6}
                 value={otp}
                 onChangeText={handleOtpChange}
               />
-              <Text className="text-sm font-bold text-slate-800 mb-1.5">PIN Mpya (Tarakimu 4 hadi 6)</Text>
-              <TextInput
-                className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-base text-slate-900"
-                placeholder="Weka PIN mpya"
-                keyboardType="numeric"
-                secureTextEntry
-                maxLength={6}
-                value={newPin}
-                onChangeText={handleNewPinChange}
-              />
+
+              <Text className="text-xs font-bold text-slate-700 mb-1.5">PIN Mpya (Tarakimu 4 hadi 6)</Text>
+              <View className="flex-row items-center bg-slate-50 border border-slate-200 rounded-2xl px-3.5 mb-5">
+                <Ionicons name="lock-closed-outline" size={20} color="#0f766e" />
+                <TextInput
+                  className="flex-1 py-3.5 px-3 text-base font-bold text-slate-900 tracking-widest"
+                  placeholder="Weka PIN mpya"
+                  keyboardType="numeric"
+                  secureTextEntry={!showNewPin}
+                  maxLength={6}
+                  value={newPin}
+                  onChangeText={handleNewPinChange}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowNewPin(!showNewPin)}
+                  className="flex-row items-center gap-1 bg-slate-200/70 px-2.5 py-1.5 rounded-xl"
+                >
+                  <Ionicons name={showNewPin ? 'eye-off-outline' : 'eye-outline'} size={18} color="#0f766e" />
+                  <Text className="text-[10px] font-bold text-slate-700">
+                    {showNewPin ? 'Ficha' : 'Ona'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
               <TouchableOpacity
-                className="bg-teal-700 p-4 rounded-2xl items-center"
+                className="bg-teal-700 p-4 rounded-2xl items-center mb-3"
                 onPress={handleResetPin}
                 disabled={loading}
               >
                 {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Hifadhi PIN Mpya</Text>}
               </TouchableOpacity>
+              <TouchableOpacity onPress={() => switchMode('LOGIN')} className="items-center py-1">
+                <Text className="text-slate-500 font-bold text-xs">Rudi Kwenye Kuingia</Text>
+              </TouchableOpacity>
             </>
           )}
-        </View>
+        </Animated.View>
 
         {/* Sehemu ya Msaada & Kadi ya Mitandao ya Kijamii Iliyofichwa */}
         <View className="mt-7 px-6 items-center">
@@ -385,7 +485,10 @@ export default function LoginScreen({ navigation }: any) {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => setShowSocials(!showSocials)}
+              onPress={() => {
+                Keyboard.dismiss();
+                setShowSocials(!showSocials);
+              }}
               className="flex-row items-center gap-1.5 bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-full"
             >
               <Ionicons name="share-social-outline" size={16} color="#5eead4" />
@@ -396,11 +499,11 @@ export default function LoginScreen({ navigation }: any) {
           </View>
 
           {showSocials && (
-            <View className="mt-4 bg-slate-900 border border-slate-800 p-4 rounded-2xl w-full items-center">
+            <View onLayout={() => loginScroll.current?.scrollToEnd({ animated: true })} className="mt-4 bg-slate-900 border border-slate-800 p-4 rounded-2xl w-full items-center">
               <Text className="text-[11px] text-slate-400 mb-3 font-medium">
                 Ungana nasi Vifani Digital kwa elimu na huduma za kidijitali
               </Text>
-              <View className="flex-row justify-center gap-3">
+              <View className="flex-row flex-wrap justify-center gap-3">
                 <TouchableOpacity
                   onPress={() => openSocialLink('https://facebook.com')}
                   className="w-10 h-10 bg-slate-800 border border-slate-700 rounded-full items-center justify-center"

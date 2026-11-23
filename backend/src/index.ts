@@ -9,8 +9,8 @@ import papoRoutes from './routes/papo';
 import loanRoutes from './routes/loans';
 import transparencyRoutes from './routes/transparency';
 
-
 dotenv.config();
+if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
 const app = express();
 app.use(cors());
 app.use(express.json());

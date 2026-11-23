@@ -50,7 +50,7 @@ const optionalLeaderSchema = z
 
 const registerGroupSchema = z.object({
   groupName: z.string().min(3, 'Jina la kikoba liwe na angalau herufi 3.'),
-  groupType: z.string().transform((val) => val.trim().toUpperCase() || 'KIKOBA').default('KIKOBA'),
+  groupType: z.string().trim().toUpperCase().pipe(z.enum(['KIKOBA', 'SHARES'], { error: 'Kwa sasa unaweza kusajili kikoba pekee. Aina nyingine zinakuja hivi punde.' })).default('KIKOBA'),
   cycleMonths: z.coerce.number().int().min(1).max(60).default(12),
   shareValue: z.coerce.number().min(500).default(5000),
   contributionFreq: z.string().transform((val) => val.trim().toUpperCase() || 'WEEKLY').default('WEEKLY'),
@@ -76,9 +76,11 @@ const registerGroupSchema = z.object({
 });
 
 function buildToken(userId: string, groupId: string, role: string) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET is missing');
   return jwt.sign(
     { userId, groupId, role },
-    process.env.JWT_SECRET || 'vifani_kikoba_secret_2026',
+    secret,
     { expiresIn: '30d' }
   );
 }

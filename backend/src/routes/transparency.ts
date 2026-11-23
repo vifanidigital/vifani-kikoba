@@ -1,3 +1,4 @@
+import { calculateShareOut } from '../lib/shareOut';
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
@@ -12,6 +13,7 @@ router.get('/share-out', authenticateToken, async (req: AuthRequest, res: Respon
     const { userId, groupId } = req.user!;
 
     const [
+      group,
       memberships,
       allShares,
       allPapoAccounts,
@@ -20,7 +22,9 @@ router.get('/share-out', authenticateToken, async (req: AuthRequest, res: Respon
       allLoans,
       allTopUps,
       expensesAgg,
-    ] = await Promise.all([
+      transactions,
+    ] = await prisma.$transaction([
+      prisma.group.findUnique({ where: { id: groupId }, select: { groupType: true } }),
       prisma.groupMember.findMany({
         where: { groupId, isActive: true },
         include: { user: { select: { id: true, fullName: true, phone: true } } },
@@ -32,82 +36,33 @@ router.get('/share-out', authenticateToken, async (req: AuthRequest, res: Respon
       prisma.loan.findMany({ where: { groupId } }),
       prisma.papoTopUp.findMany({ where: { groupId } }),
       prisma.groupExpense.aggregate({ where: { groupId }, _sum: { amount: true } }),
-    ]);
+      prisma.transaction.findMany({ where: { groupId, type: { in: ['PAPO_INTEREST', 'LOAN_INTEREST_REPAYMENT'] } } }),
+    ], { isolationLevel: 'RepeatableRead' });
 
-    const totalGroupSharesCount = allShares.reduce((s, r) => s + r.sharesCount, 0);
-    const totalGroupSharesValue = allShares.reduce((s, r) => s + r.amountPaid, 0);
-    const totalGroupSocialFund = allShares.reduce((s, r) => s + r.socialFundPaid, 0);
-    const totalGroupPaidFines = allPaidFines.reduce((s, f) => s + f.amount, 0);
-    const totalExpenses = expensesAgg._sum.amount || 0;
-
-    // Jumla ya faida zote za kikundi zinazogawiwa kwa uwiano wa hisa
-    let totalLoanInterestCollected = 0;
-    for (const l of allLoans) {
-      const interestPart = Math.max(0, (l.totalRepayable || 0) - (l.principalAmount || 0));
-      totalLoanInterestCollected += Math.min(interestPart, l.amountPaid || 0);
+    if (!group || !memberships.some(member => member.userId === userId)) {
+      return res.status(404).json({ error: 'Uanachama hai wa kikundi haujapatikana.' });
     }
-
-    let totalPapoInterestCollected = 0;
-    for (const t of allTopUps) {
-      const interestPart = Math.max(0, (t.totalPayable || 0) - (t.principalAmount || 0));
-      totalPapoInterestCollected += Math.min(interestPart, t.amountPaid || 0);
+    if (!['KIKOBA', 'SHARES'].includes(group.groupType)) {
+      return res.status(400).json({ error: 'Kanuni ya mgawo wa aina hii ya kikundi bado haijapatikana.' });
     }
-
-    // Faida ya pamoja inayogawiwa kwa uwiano wa hisa (Riba zote + Faini zilizolipwa - Matumizi ya uendeshaji)
-    const distributableProfitPool = Math.max(
-      0,
-      totalLoanInterestCollected + totalPapoInterestCollected + totalGroupPaidFines - totalExpenses
-    );
-
-    const breakdownByMember = memberships.map((m) => {
-      const mySharesList = allShares.filter((s) => s.userId === m.userId);
-      const mySharesCount = mySharesList.reduce((s, r) => s + r.sharesCount, 0);
-      const myCapital = mySharesList.reduce((s, r) => s + r.amountPaid, 0);
-      const myPapoMandatory = allPapoAccounts.find((p) => p.userId === m.userId)?.mandatoryBalance || 0;
-
-      // Gawio la faida kwa uwiano wa hisa zake
-      const shareRatio = totalGroupSharesCount > 0 ? mySharesCount / totalGroupSharesCount : 0;
-      const estimatedProfitDividend = Math.round(distributableProfitPool * shareRatio);
-
-      // Makato ya madeni yake yote (Mikopo mikubwa + Papo ya hiari + Faini zisizolipwa)
-      const myActiveLoansDebt = allLoans
-        .filter((l) => l.userId === m.userId && (l.status === 'DISBURSED' || l.status === 'OVERDUE'))
-        .reduce((s, l) => s + Math.max(0, (l.totalRepayable || 0) - (l.amountPaid || 0)), 0);
-
-      const myActiveTopUpDebt = allTopUps
-        .filter((t) => t.userId === m.userId && (t.status === 'ACTIVE' || t.status === 'OVERDUE'))
-        .reduce((s, t) => s + Math.max(0, (t.totalPayable || 0) - (t.amountPaid || 0)), 0);
-
-      const myUnpaidFines = allUnpaidFines
-        .filter((f) => f.userId === m.userId)
-        .reduce((s, f) => s + f.amount, 0);
-
-      const totalDeductions = myActiveLoansDebt + myActiveTopUpDebt + myUnpaidFines;
-      const grossPayout = myCapital + myPapoMandatory + estimatedProfitDividend;
-      const netPayout = Math.max(0, grossPayout - totalDeductions);
-
-      return {
-        userId: m.userId,
-        fullName: m.user.fullName,
-        mySharesCount,
-        myCapital,
-        myPapoMandatory,
-        estimatedProfitDividend,
-        totalDeductions,
-        grossPayout,
-        netPayout,
-      };
+    const result = calculateShareOut({
+      members: memberships.map(member => ({ userId: member.userId, fullName: member.user.fullName })),
+      shares: allShares,
+      papoAccounts: allPapoAccounts,
+      periodicPapo: transactions.filter(row => row.type === 'PAPO_INTEREST'),
+      interest: transactions.filter(row => row.type === 'LOAN_INTEREST_REPAYMENT'),
+      loans: allLoans,
+      topUps: allTopUps,
+      unpaidFines: allUnpaidFines,
+      paidFines: allPaidFines.reduce((sum, fine) => sum + fine.amount, 0),
+      expenses: expensesAgg._sum.amount ?? 0,
     });
-
-    const myEstimate = breakdownByMember.find((x) => x.userId === userId) || null;
-
+    const myEstimate = result.membersPayout.find(member => member.userId === userId) ?? null;
     res.json({
-      totalGroupSharesValue,
-      totalGroupSocialFund,
-      distributableProfitPool,
-      totalExpenses,
+      ...result,
+      membersPayout: myEstimate ? [myEstimate] : [],
       myEstimate,
-      membersPayout: breakdownByMember,
+      calculation: 'KIKOBA_EQUAL_V1',
     });
   } catch {
     res.status(500).json({ error: 'Imeshindikana kukokotoa mgawo wa mwisho wa mzunguko.' });
@@ -140,7 +95,7 @@ router.post('/expenses', authenticateToken, async (req: AuthRequest, res: Respon
     const beneficiary = String(req.body.beneficiary || '').trim();
     const amount = Number(req.body.amount);
 
-    if (title.length < 2 || !amount || amount <= 0) {
+    if (title.length < 2 || !Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ error: 'Weka maelezo ya matumizi na kiasi sahihi.' });
     }
 
