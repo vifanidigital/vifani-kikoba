@@ -61,6 +61,7 @@ model Group {
   socialFundMin       Float    @default(0)
   socialFundMax       Float    @default(0)
 
+  showOptionalPapoInBalance Boolean @default(false)
   hasPapo             Boolean  @default(false)
   mandatoryPapoAmount Float    @default(0)
   papoMeetingInterest Float    @default(10)
@@ -113,6 +114,7 @@ model GroupMember {
   user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   role                 String   @default("MEMBER")
   isActive             Boolean  @default(true)
+  removedAt DateTime?
   suspendedAt          DateTime?
   suspensionReason     String?
   memberInterestProfit Float    @default(0)

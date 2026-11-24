@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { historicalSchedule, localDate, meetingDayEnd, meetingProgress, meetingWeekday, parseMeetingDate } from '../src/lib/meetingCalendar';
+import { historicalSchedule, localDate, meetingDateForWeek, meetingDayEnd, meetingProgress, meetingWeekday, parseMeetingDate } from '../src/lib/meetingCalendar';
 
 test('backfills only the configured weekly meeting day before today', () => {
   const today = parseMeetingDate('2026-11-19')!;
@@ -30,4 +30,11 @@ test('Sunday start aligns to the next Thursday and reports only unfinished weeks
     { userId: 'inactive', meetingDate: parsed(dates[1]) },
   ]);
   assert.deepEqual(progress.map(({ filled, complete }) => [filled, complete]), [[2, true], [1, false], [0, false]]);
+});
+
+test('meeting lookup numbers weeks from the first configured meeting day', () => {
+  const sunday = parseMeetingDate('2026-10-04')!;
+  assert.equal(localDate(meetingDateForWeek(sunday, 4, 1)!), '2026-10-08');
+  assert.equal(localDate(meetingDateForWeek(sunday, 4, 4)!), '2026-10-29');
+  assert.equal(meetingDateForWeek(sunday, 4, 0), null);
 });

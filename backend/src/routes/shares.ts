@@ -1,15 +1,14 @@
 import { outstandingPapoPrincipal } from '../lib/papoPayment';
 import { currentLoanQuote, RepaymentPlan } from '../lib/loanRepayment';
 import historicalMeetings from './historicalMeetings';
-import { localDate, parseMeetingDate } from '../lib/meetingCalendar';
+import { localDate, meetingDateForWeek, meetingDayEnd, parseMeetingDate } from '../lib/meetingCalendar';
 import { interestTiming } from '../lib/loanInterest';
 import { Router, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
 
 const router = Router();
 router.use('/historical-meetings', historicalMeetings);
-const prisma = new PrismaClient();
 const LEADER_ROLES = ['CHAIRPERSON', 'SECRETARY', 'TREASURER'];
 
 // 1. MUHTASARI WA MFUKO MKUU + MUHTASARI WA KIKAO CHA LEO (DASHBOARD)
@@ -160,7 +159,9 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
         totalUnpaidFines,
         totalGroupExpenses,
       },
+      optionalPapoOutstanding: papoTopUpOut,
       todaySummary: {
+        date: localDate(startOfToday),
         sharesCollected: tShares,
         papoCollected: tPapoInterest + tPapoTopUpInterestRepaid,
         socialCollected: tSocial,
@@ -179,6 +180,58 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
     res.status(500).json({ error: 'Imeshindikana kupakia muhtasari.' });
   }
 });
+router.get('/meeting-lookup', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { groupId, userId, role } = req.user!;
+  try {
+    const dateText = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+    const weekText = typeof req.query.week === 'string' ? req.query.week.trim() : '';
+    if (Boolean(dateText) === Boolean(weekText) || (weekText && !/^[1-9][0-9]{0,2}$/.test(weekText))) {
+      return res.status(400).json({ error: 'Weka tarehe au namba ya juma.' });
+    }
+    const group = await prisma.group.findUniqueOrThrow({
+      where: { id: groupId },
+      select: { historicalMeetingStart: true, historicalMeetingWeekday: true, cycleStartedAt: true, createdAt: true, meetingDayOfWeek: true },
+    });
+    const start = parseMeetingDate(localDate(group.historicalMeetingStart ?? group.cycleStartedAt ?? group.createdAt))!;
+    const weekday = group.historicalMeetingWeekday ?? group.meetingDayOfWeek;
+    const today = parseMeetingDate(localDate(new Date()))!;
+    const date = dateText ? parseMeetingDate(dateText) : meetingDateForWeek(start, weekday, Number(weekText));
+    if (!date || date < start || date > today) return res.status(404).json({ error: 'Tarehe au juma hilo halipo ndani ya mzunguko ulio wazi.' });
+    const first = meetingDateForWeek(start, weekday, 1);
+    const daysFromFirst = first ? (date.getTime() - first.getTime()) / 86400000 : -1;
+    const week = daysFromFirst >= 0 && daysFromFirst % 7 === 0 ? daysFromFirst / 7 + 1 : null;
+    const window = { gte: date, lt: meetingDayEnd(date) };
+    const [shares, fines, ledger, expenses, oldLoans, oldPapo] = await prisma.$transaction([
+      prisma.shareRecord.findMany({ where: { groupId, meetingDate: window }, select: { userId: true, sharesCount: true, amountPaid: true, socialFundPaid: true, user: { select: { fullName: true } } } }),
+      prisma.fineRecord.findMany({ where: { groupId, OR: [{ paidAt: window }, { createdAt: window, isPaid: false }] }, select: { amount: true, isPaid: true } }),
+      prisma.transaction.findMany({ where: { groupId, createdAt: window }, select: { type: true, amount: true } }),
+      prisma.groupExpense.aggregate({ where: { groupId, createdAt: window }, _sum: { amount: true }, _count: true }),
+      prisma.loan.aggregate({ where: { groupId, fundedAmount: null, disbursedAt: window }, _sum: { principalAmount: true }, _count: true }),
+      prisma.papoTopUp.aggregate({ where: { groupId, fundedAmount: null, status: { in: ['ACTIVE','OVERDUE','REPAYMENT_PENDING','PAID'] }, createdAt: window }, _sum: { principalAmount: true }, _count: true }),
+    ]);
+    const sum = (types: string[]) => ledger.filter(row => types.includes(row.type)).reduce((total, row) => total + row.amount, 0);
+    res.json({
+      date: localDate(date), week,
+      hasRecords: Boolean(shares.length || fines.length || ledger.length || expenses._count || oldLoans._count || oldPapo._count),
+      membersRecorded: new Set(shares.map(row => row.userId)).size,
+      shares: shares.reduce((total, row) => total + row.amountPaid, 0),
+      social: shares.reduce((total, row) => total + row.socialFundPaid, 0),
+      papoInterest: sum(['PAPO_INTEREST','PAPO_TOPUP_INTEREST_REPAYMENT']),
+      papoRepaid: sum(['PAPO_TOPUP_REPAYMENT']),
+      papoIssued: sum(['PAPO_TOPUP_DISBURSEMENT']) + (oldPapo._sum.principalAmount ?? 0),
+      loanIssued: sum(['LOAN_DISBURSEMENT']) + (oldLoans._sum.principalAmount ?? 0),
+      loanPrincipalRepaid: sum(['LOAN_REPAYMENT']), loanInterestRepaid: sum(['LOAN_INTEREST_REPAYMENT']),
+      paidFines: fines.filter(row => row.isPaid).reduce((total, row) => total + row.amount, 0),
+      unpaidFines: fines.filter(row => !row.isPaid).reduce((total, row) => total + row.amount, 0),
+      expenses: expenses._sum.amount ?? 0,
+      memberEntries: shares.filter(row => LEADER_ROLES.includes(role) || row.userId === userId).map(({ user: { fullName }, userId: id, ...entry }) => ({ id, fullName, ...entry })),
+    });
+  } catch (error) {
+    console.error('Meeting lookup failed', error instanceof Error ? error.name : 'Unknown');
+    res.status(500).json({ error: 'Imeshindikana kupakia kikao. Jaribu tena.' });
+  }
+});
+
 // 2. DATA YA KIKAO & HISTORIA KAMILI YA KILA MKUTANO WA MWANACHAMA
 router.get('/session-data', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {

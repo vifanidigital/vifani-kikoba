@@ -76,7 +76,7 @@ router.get('/:date', async (req: AuthRequest, res) => {
   const group = await prisma.group.findUnique({ where: { id: groupId }, select: groupFields });
   if (!group || !date || !isScheduled(date, group)) return res.status(400).json({ error: 'Tarehe hiyo haipo kwenye ratiba ya nyuma.' });
   const members = await prisma.groupMember.findMany({
-    where: { groupId },
+    where: { groupId, removedAt: null },
     select: { userId: true, isActive: true, user: { select: { fullName: true } } }, orderBy: { joinedAt: 'asc' },
   });
   const records = await prisma.shareRecord.findMany({
@@ -149,8 +149,8 @@ router.post('/:date', async (req: AuthRequest, res) => {
       const group = await tx.group.findUnique({ where: { id: groupId }, select: groupFields });
       if (!group || !isScheduled(date, group)) return 'DATE';
       if (papoInterestPaid > 0 && !group.hasPapo) return 'PAPO';
-      const membership = await tx.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } }, select: { isActive: true } });
-      if (!membership) return 'MEMBER';
+      const membership = await tx.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } }, select: { removedAt: true } });
+      if (!membership || membership.removedAt) return 'MEMBER';
       const window = { gte: date, lt: meetingDayEnd(date) };
       const existing = await tx.shareRecord.findFirst({ where: { groupId, userId, meetingDate: window } });
       if (existing) return 'EXISTS';

@@ -17,12 +17,17 @@ export function meetingDayEnd(date: Date) {
 
 export const meetingWeekday = (date: Date) => new Date(date.getTime() + EAT).getUTCDay();
 
+export function meetingDateForWeek(start: Date, weekday: number, week: number) {
+  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6 || !Number.isInteger(week) || week < 1) return null;
+  const offset = (weekday - meetingWeekday(start) + 7) % 7;
+  return new Date(start.getTime() + (offset + (week - 1) * 7) * DAY);
+}
+
 export function historicalSchedule(start: Date, weekday: number, today: Date) {
-  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return [];
-  const localWeekday = meetingWeekday(start);
-  const first = start.getTime() + ((weekday - localWeekday + 7) % 7) * DAY;
+  const first = meetingDateForWeek(start, weekday, 1);
+  if (!first) return [];
   const dates: string[] = [];
-  for (let next = first; next < today.getTime(); next += 7 * DAY) {
+  for (let next = first.getTime(); next < today.getTime(); next += 7 * DAY) {
     dates.push(localDate(new Date(next)));
   }
   return dates.reverse();

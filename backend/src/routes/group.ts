@@ -2,12 +2,12 @@ import { currentLoanQuote } from '../lib/loanRepayment';
 import { subscriptionAccess } from '../lib/subscription';
 import { interestTiming } from '../lib/loanInterest';
 import { Router, Response } from 'express';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { z } from 'zod';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
 
 const router = Router();
-const prisma = new PrismaClient();
 const LEADER_ROLES = ['CHAIRPERSON', 'SECRETARY', 'TREASURER'];
 
 const formatLocalPhone = (phone?: string | null) => {
@@ -48,7 +48,7 @@ router.get('/settings', authenticateToken, async (req: AuthRequest, res: Respons
     const [group, members] = await Promise.all([
       prisma.group.findUnique({ where: { id: groupId } }),
       prisma.groupMember.findMany({
-        where: { groupId },
+        where: { groupId, removedAt: null },
         include: {
           user: { select: { id: true, fullName: true, phone: true } },
         },
@@ -164,6 +164,15 @@ router.put('/constitution', authenticateToken, async (req: AuthRequest, res: Res
 });
 
 // 4. MWENYEKITI KUSASISHA SHERIA NA FAINI
+router.patch('/papo-balance-display', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (req.user!.role !== 'CHAIRPERSON') return res.status(403).json({ error: 'Mwenyekiti pekee anaweza kubadili mwonekano wa salio.' });
+  const input = z.object({ show: z.boolean() }).safeParse(req.body);
+  if (!input.success) return res.status(400).json({ error: 'Chagua kuonyesha au kuficha Papo.' });
+  const group = await prisma.group.update({ where: { id: req.user!.groupId }, data: { showOptionalPapoInBalance: input.data.show },
+    select: { showOptionalPapoInBalance: true } });
+  res.json(group);
+});
+
 router.put('/settings', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const { groupId, role, userId } = req.user!;

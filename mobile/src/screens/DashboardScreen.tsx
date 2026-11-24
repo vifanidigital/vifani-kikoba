@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Alert,
   Animated,
   LayoutAnimation,
 } from 'react-native';
@@ -31,6 +32,7 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [groupSettings, setGroupSettings] = useState<any>(null);
+  const [savingPapoDisplay, setSavingPapoDisplay] = useState(false);
 
   const [hideBalances, setHideBalances] = useUserPreference(user?.id, 'hide_balances', false);
   const [showMeetingReminder] = useUserPreference(user?.id, 'meeting_alerts', true);
@@ -172,6 +174,19 @@ export default function DashboardScreen() {
 
 
   const b = summary?.breakdown || {};
+  const optionalPapo = Number(summary?.optionalPapoOutstanding || 0);
+  const showOptionalPapo = groupSettings?.showOptionalPapoInBalance === true;
+  const excludedPapo = showOptionalPapo ? 0 : optionalPapo;
+  const togglePapoBalance = async () => {
+    if (savingPapoDisplay) return;
+    setSavingPapoDisplay(true);
+    try {
+      await apiClient.patch('/group/papo-balance-display', { show: !showOptionalPapo });
+      await loadDashboard();
+    } catch {
+      Alert.alert('Hitilafu', 'Imeshindikana kubadili mwonekano wa salio la Papo.');
+    } finally { setSavingPapoDisplay(false); }
+  };
   const breakdownGrandTotal =
     Number(b.totalSharesValue || 0) +
     Number(b.totalPapoMandatory || 0) +
@@ -293,7 +308,7 @@ export default function DashboardScreen() {
             </View>
 
             <Text className="text-white text-3xl font-extrabold mt-1.5">
-              {formatMoney(summary?.totalGroupBalance)}
+              {formatMoney(Math.max(0, Number(summary?.totalGroupBalance || 0) - excludedPapo))}
             </Text>
 
             <View className="flex-row justify-between mt-4 pt-3 border-t border-slate-800">
@@ -304,12 +319,20 @@ export default function DashboardScreen() {
                 </Text>
               </View>
               <View className="items-end">
-                <Text className="text-slate-400 text-[11px]">Mikopo Iliyoko Nje</Text>
+                <Text className="text-slate-400 text-[11px]">Mikopo Mikubwa Iliyoko Nje</Text>
                 <Text className="text-amber-400 font-bold text-sm mt-0.5">
-                  {formatMoney(summary?.totalLoansOut)}
+                  {formatMoney(Math.max(0, Number(summary?.totalLoansOut || 0) - optionalPapo))}
                 </Text>
               </View>
             </View>
+            {showOptionalPapo && <Text className="mt-3 text-sm text-amber-300">Papo ya hiari iliyo nje: {formatMoney(optionalPapo)}</Text>}
+            {!showOptionalPapo && optionalPapo > 0 && <Text className="mt-3 text-xs text-slate-300">Jumla hii haijumuishi Papo ya hiari iliyo kwa wanachama.</Text>}
+            {activeRole === 'CHAIRPERSON' && (groupSettings?.hasPapo || optionalPapo > 0) && (
+              <TouchableOpacity accessibilityRole="switch" accessibilityState={{ checked: showOptionalPapo }} onPress={() => void togglePapoBalance()}
+                disabled={savingPapoDisplay} className="mt-3 self-start rounded-lg border border-teal-400 px-3 py-2">
+                <Text className="font-bold text-teal-200">{showOptionalPapo ? 'Ficha Papo ya hiari kwenye jumla' : 'Onyesha Papo ya hiari kwenye jumla'}</Text>
+              </TouchableOpacity>
+            )}
           </View>
           {/* KADI YA HISA ZANGU NA MADENI YANGU */}
           <View className="flex-row gap-3 mb-4">
@@ -428,7 +451,7 @@ export default function DashboardScreen() {
 
                 <View className="flex-row justify-between items-center bg-teal-600/15 p-3 rounded-xl mt-2.5">
                   <Text className="text-xs font-extrabold text-teal-800">JUMLA KUU YA MFUKO:</Text>
-                  <Text className="text-sm font-extrabold text-teal-800">{formatMoney(breakdownGrandTotal)}</Text>
+                  <Text className="text-sm font-extrabold text-teal-800">{formatMoney(Math.max(0, breakdownGrandTotal - excludedPapo))}</Text>
                 </View>
 
                 {Number(b.totalUnpaidFines || 0) > 0 && (
@@ -456,7 +479,7 @@ export default function DashboardScreen() {
                     Muhtasari wa Kikao cha Leo
                   </Text>
                   <Text className={`text-[11px] ${textSub}`}>
-                    {showTodaySummary ? 'Gusa kufunga maelezo' : 'Gusa kuona makusanyo, mikopo & matumizi ya leo'}
+                    {ts.date ? new Date(ts.date + 'T12:00:00+03:00').toLocaleDateString('sw-TZ', { dateStyle: 'full', timeZone: 'Africa/Dar_es_Salaam' }) : 'Inasubiri tarehe ya seva'}
                   </Text>
                 </View>
               </View>

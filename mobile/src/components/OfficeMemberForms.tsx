@@ -78,6 +78,21 @@ export function MemberStatusForm({ member, reload }: {
   const { isDark } = useTheme();
   const textClass = isDark ? 'text-white' : 'text-slate-900';
 
+  const remove = () => Alert.alert('Ondoa mwanachama?', member.fullName + ' ataondolewa kwenye orodha ya wanachama na fomu za vikao. Rekodi zake za fedha zitahifadhiwa.', [
+    { text: 'Ghairi', style: 'cancel' },
+    { text: 'Ondoa', style: 'destructive', onPress: async () => {
+      setSaving(true);
+      setError('');
+      try {
+        const response = await apiClient.delete('/members/' + encodeURIComponent(member.userId));
+        await reload();
+        Alert.alert('Uanachama', response.data.message);
+      } catch (cause) {
+        setError(errorMessage(cause));
+      } finally { setSaving(false); }
+    } },
+  ]);
+
   const submit = async (active: boolean) => {
     if (saving) return;
     if (!active && !reason.trim()) {
@@ -113,6 +128,9 @@ export function MemberStatusForm({ member, reload }: {
           <Text className={textClass}>{member.isActive ? 'Simamisha uanachama' : 'Rejesha uanachama'}</Text>
         </Pressable>
       )}
+      {!open && <Pressable accessibilityRole="button" disabled={saving} onPress={remove} className="mt-2 self-start rounded-xl border border-rose-600 px-3 py-2">
+        <Text className="font-bold text-rose-600">Ondoa mwanachama</Text>
+      </Pressable>}
       {error ? <Text accessibilityRole="alert" className="mt-2 text-rose-600">{error}</Text> : null}
     </View>
   );

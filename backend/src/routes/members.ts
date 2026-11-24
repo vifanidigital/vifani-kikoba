@@ -1,3 +1,4 @@
+import { lockLoanGroup } from './loanQueue';
 import { randomInt } from 'node:crypto';
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
@@ -107,8 +108,10 @@ router.post('/add', authenticateToken, async (req: AuthRequest, res: Response) =
         member = await tx.user.create({ data: { fullName, phone, pinHash, isVerified: false } });
       }
       const existing = await tx.groupMember.findUnique({ where: { groupId_userId: { groupId, userId: member.id } } });
-      if (existing) return existing.isActive ? 'ACTIVE_MEMBER' : 'SUSPENDED_MEMBER';
-      await tx.groupMember.create({ data: { groupId, userId: member.id } });
+      if (existing && !existing.removedAt) return existing.isActive ? 'ACTIVE_MEMBER' : 'SUSPENDED_MEMBER';
+      if (existing) {
+        await tx.groupMember.update({ where: { id: existing.id }, data: { role: 'MEMBER', isActive: true, removedAt: null, suspendedAt: null, suspensionReason: null } });
+      } else await tx.groupMember.create({ data: { groupId, userId: member.id } });
       const settings = await tx.group.findUniqueOrThrow({ where: { id: groupId }, select: { hasPapo: true, mandatoryPapoAmount: true } });
       if (settings.hasPapo && settings.mandatoryPapoAmount > 0) {
         await tx.papoAccount.upsert({
@@ -165,6 +168,34 @@ router.post('/:targetUserId/pin-reset', authenticateToken, async (req: AuthReque
   res.status(201).json({ code, expiresAt });
 });
 
+router.delete('/:targetUserId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { groupId, userId, role } = req.user!;
+  const target = String(req.params.targetUserId);
+  if (role !== 'CHAIRPERSON' || target === userId) return res.status(403).json({ error: 'Mwenyekiti anaweza kuondoa mwanachama mwingine pekee.' });
+  const outcome = await prisma.$transaction(async tx => {
+    await lockLoanGroup(tx, groupId);
+    const member = await tx.groupMember.findFirst({ where: { groupId, userId: target, role: { not: 'CHAIRPERSON' }, removedAt: null } });
+    if (!member) return 'MISSING';
+    const pending = { groupId, userId: target, status: 'PENDING' };
+    const partial = { ...pending, fundedAmount: { gt: 0 } };
+    if (await tx.loan.count({ where: partial }) || await tx.papoTopUp.count({ where: partial })) return 'PARTIAL';
+    const notFunded = { ...pending, OR: [{ fundedAmount: null }, { fundedAmount: 0 }] };
+    const feedback = 'Ombi limefungwa kwa sababu uanachama umeondolewa.';
+    await tx.loan.updateMany({ where: notFunded, data: { status: 'REJECTED', feedback } });
+    await tx.papoTopUp.updateMany({ where: notFunded, data: { status: 'REJECTED', feedback } });
+    await tx.loan.updateMany({
+      where: { groupId, guarantorId: target, guarantorStatus: 'PENDING', status: 'PENDING', OR: [{ fundedAmount: null }, { fundedAmount: 0 }] },
+      data: { status: 'REJECTED', guarantorStatus: 'REJECTED', feedback: 'Mdhamini ameondolewa. Omba tena ukichagua mdhamini mwingine.' },
+    });
+    await tx.memberTermination.updateMany({ where: { groupId, targetUserId: target, status: 'VOTING' }, data: { status: 'CANCELLED' } });
+    await tx.groupMember.update({ where: { id: member.id }, data: { isActive: false, removedAt: new Date() } });
+    return 'REMOVED';
+  });
+  if (outcome === 'MISSING') return res.status(404).json({ error: 'Mwanachama hajapatikana.' });
+  if (outcome === 'PARTIAL') return res.status(409).json({ error: 'Mwanachama ana ombi ambalo fedha zimetolewa kwa sehemu. Malizia ombi hilo kwanza.' });
+  res.json({ message: 'Mwanachama ameondolewa kwenye orodha. Rekodi zake za fedha zimehifadhiwa.' });
+});
+
 router.patch('/:targetUserId/status', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { groupId, userId, role } = req.user!;
   if (role !== 'CHAIRPERSON') return res.status(403).json({ error: 'Mwenyekiti pekee anaweza kubadili hali ya uanachama.' });
@@ -176,7 +207,7 @@ router.patch('/:targetUserId/status', authenticateToken, async (req: AuthRequest
   try {
     const { active, reason } = input.data;
     const changed = await prisma.groupMember.updateMany({
-      where: { groupId, userId: target, role: { not: 'CHAIRPERSON' } },
+      where: { groupId, userId: target, role: { not: 'CHAIRPERSON' }, removedAt: null },
       data: { isActive: active, suspendedAt: active ? null : new Date(), suspensionReason: active ? null : reason },
     });
     if (!changed.count) return res.status(404).json({ error: 'Mwanachama wa kubadili hali yake hajapatikana.' });

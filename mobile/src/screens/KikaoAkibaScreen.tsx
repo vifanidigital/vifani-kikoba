@@ -1,3 +1,4 @@
+import MeetingLookup from '../components/MeetingLookup';
 import HistoricalMeetings from '../components/HistoricalMeetings';
 import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { useFocusEffect } from 'expo-router';
@@ -302,6 +303,7 @@ export default function KikaoAkibaScreen() {
           />
         }
       >
+        <MeetingLookup key={activeGroup?.id ?? 'lookup'} />
         {role === 'CHAIRPERSON' && <HistoricalMeetings key={activeGroup?.id} refresh={loadSession} />}
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
           {cycleInfo && (

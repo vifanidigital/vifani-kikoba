@@ -22,7 +22,7 @@ export async function saveHistoricalEvent(tx: Prisma.TransactionClient, groupId:
   if (past) throw new HistoricalConflict('Rejea hii tayari imetumika kwenye kikao hiki.');
   const group = await tx.group.findUniqueOrThrow({ where: { id: groupId } });
   const member = await tx.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
-  if (!member) throw new HistoricalConflict('Mwanachama hayupo kwenye kikundi.');
+  if (!member || member.removedAt) throw new HistoricalConflict('Mwanachama hayupo kwenye kikundi.');
   if (kind.startsWith('PAPO') && !group.hasPapo) throw new HistoricalConflict('Washa Papo kwenye mipangilio ya kikundi.');
   if (kind !== 'LOAN_IN' && amount <= 0) throw new HistoricalConflict('Weka kiasi kikubwa kuliko sifuri.');
   let first = true;
