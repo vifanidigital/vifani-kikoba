@@ -72,7 +72,7 @@ export default function CycleManagement({ canClose, closedAt, preview, reload }:
       const { uri } = await Print.printToFileAsync({ html });
       const file = new File(uri);
       if (!file.exists || !file.size) throw new Error('Faili la PDF halikupatikana.');
-      const named = new File(Paths.cache, 'Ripoti-Kikoba-' + data.closedAt.slice(0, 10) + '-' + Date.now() + '.pdf');
+      const named = new File(Paths.cache, 'Ripoti-Kikoba-' + data.closedAt.slice(0, 10) + '-' + file.name);
       let shareUri = uri;
       try {
         await file.move(named);
