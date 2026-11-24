@@ -303,8 +303,8 @@ export default function KikaoAkibaScreen() {
           />
         }
       >
-        <MeetingLookup key={activeGroup?.id ?? 'lookup'} />
-        {role === 'CHAIRPERSON' && <HistoricalMeetings key={activeGroup?.id} refresh={loadSession} />}
+        <MeetingLookup key={'meeting-lookup-' + (activeGroup?.id ?? '')} />
+        {role === 'CHAIRPERSON' && <HistoricalMeetings key={'historical-meetings-' + (activeGroup?.id ?? '')} refresh={loadSession} />}
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
           {cycleInfo && (
             <View className="bg-slate-900 p-4 rounded-2xl mb-4 border border-slate-800 flex-row justify-between items-center shadow-sm">

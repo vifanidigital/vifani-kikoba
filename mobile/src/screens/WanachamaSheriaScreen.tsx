@@ -31,6 +31,23 @@ import { parseOffice } from '../api/tabResponses';
 
 const LEADER_ROLES = ['CHAIRPERSON', 'SECRETARY', 'TREASURER'];
 
+function OfficeAction({ icon, label, onPress, selected, primary, disabled, dark }: {
+  icon: React.ComponentProps<typeof Ionicons>['name']; label: string; onPress: () => void;
+  selected?: boolean; primary?: boolean; disabled?: boolean; dark: boolean;
+}) {
+  const filled = primary || selected;
+  return (
+    <TouchableOpacity accessibilityRole="button" accessibilityState={{ selected, disabled }} disabled={disabled} onPress={onPress}
+      className={'min-h-11 flex-row items-center justify-center gap-2 rounded-xl border px-3 py-2.5 ' +
+        (filled ? 'border-teal-700 bg-teal-700' : dark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-slate-50') +
+        (disabled ? ' opacity-60' : '')}>
+      <Ionicons name={icon} size={16} color={filled ? '#ffffff' : dark ? '#99f6e4' : '#115e59'} />
+      <Text className={'shrink text-xs font-bold ' + (filled ? 'text-white' : dark ? 'text-teal-100' : 'text-teal-950')}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+
 export default function WanachamaSheriaScreen() {
   const insets = useSafeAreaInsets();
   const { role, user, group: activeGroup } = useAuth();
@@ -41,6 +58,8 @@ export default function WanachamaSheriaScreen() {
   const [activeSection, setActiveSection] = useState<'MEMBERS' | 'RULES' | 'CONSTITUTION'>('MEMBERS');
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [announcementScope, setAnnouncementScope] = useState<string | null>(null);
+  const [manageMember, setManageMember] = useState<string | null>(null);
   const [contactMember, setContactMember] = useState<any>(null);
   const [auditedUserId, setAuditedUserId] = useState<string | null>(null);
   const auditVersion = useRef(0);
@@ -296,14 +315,15 @@ export default function WanachamaSheriaScreen() {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className={`flex-1 ${bgClass}`}>
       <View
         style={{ paddingTop: Math.max(insets.top + 10, 44) }}
-        className="bg-teal-700 pb-5 px-6 rounded-b-3xl shadow-md"
+        className="bg-slate-950 pb-4 px-5 rounded-b-3xl"
       >
         <View className="flex-row justify-between items-center">
-          <View className="flex-1">
-            <Text className="text-2xl font-extrabold text-white">Ofisi & Sheria</Text>
-            <Text className="text-teal-100 text-xs mt-1">
-              Wanachama, Mawasiliano, Sheria za Kikoba & Katiba
-            </Text>
+          <View className="flex-1 flex-row items-center gap-3">
+            <View className="rounded-2xl bg-teal-900 p-3"><Ionicons name="business-outline" size={22} color="#99f6e4" /></View>
+            <View className="flex-1">
+              <Text className="text-2xl font-extrabold text-white">Ofisi na Sheria</Text>
+              {group?.name ? <Text numberOfLines={1} className="mt-0.5 text-xs text-teal-100">{group.name}</Text> : null}
+            </View>
           </View>
           {panel.loading && (
             <View className="flex-row items-center gap-1.5 bg-teal-900/70 px-3 py-1.5 rounded-full">
@@ -333,11 +353,20 @@ export default function WanachamaSheriaScreen() {
             <Text className="mb-3 rounded-xl bg-amber-100 p-3 text-sm text-amber-900">Kikundi kinaweza kusoma taarifa. Wasiliana na msimamizi kuhusu huduma.</Text>
           )}
           <TabDataNotice loading={panel.loading} error={panel.error} hasData={panel.data != null} retry={panel.reload} />
-          {isChairperson && group && <GroupAnnouncementEditor key={scope} group={group} reload={loadOffice} />}
           {panel.data != null && <>
           {activeSection === 'MEMBERS' && (
             <>
-              {isChairperson && <AddMemberForm reload={loadOffice} />}
+              {isChairperson && group && (
+                <View className={`mb-4 rounded-2xl border p-4 ${cardClass}`}>
+                  <Text className={`mb-3 text-base font-bold ${textMain}`}>Usimamizi wa kikundi</Text>
+                  <AddMemberForm key={scope} reload={loadOffice} />
+                  <OfficeAction icon="megaphone-outline" label="Tangazo la kikundi" dark={isDark} selected={announcementScope === scope}
+                    onPress={() => setAnnouncementScope(announcementScope === scope ? null : scope)} />
+                  {announcementScope === scope && <View className="mt-3">
+                    <GroupAnnouncementEditor key={scope} group={group} reload={loadOffice} />
+                  </View>}
+                </View>
+              )}
               <View className="bg-slate-900 p-4 rounded-2xl mb-4 border border-slate-800 shadow-sm">
                 <Text className="text-teal-300 text-xs font-extrabold uppercase mb-1.5">
                   Ratiba ya Vikao vya Kikundi
@@ -379,50 +408,38 @@ export default function WanachamaSheriaScreen() {
                 )}
               </View>
 
-              <View className="flex-row items-center gap-1.5 mb-2.5">
-                <Ionicons name="lock-closed" size={14} color="#0f766e" />
-                <Text className={`text-[11px] font-bold ${textSub}`}>
-                  {isLeader
-                    ? 'Gusa jina kukagua taarifa za siri, au bonyeza "Mawasiliano"'
-                    : 'Usiri umelindwa • Bonyeza "Mawasiliano" kupiga simu au kutuma ujumbe'}
-                </Text>
-              </View>
+              <Text className={`mb-2 text-sm font-bold ${textMain}`}>Wanachama ({filteredDirectory.length})</Text>
               {filteredDirectory.map((m) => {
                 const isAuditing = auditedUserId === m.userId;
+                const canManage = isChairperson && m.userId !== user?.id && m.role !== 'CHAIRPERSON';
+                const manageKey = scope + ':' + m.userId;
+                const isManaging = manageMember === manageKey;
+                const initials = m.fullName.trim().split(/\s+/).slice(0, 2).map(name => name[0] || '').join('').toUpperCase();
                 return (
-                  <View key={m.memberId} className={`p-4 rounded-2xl border mb-2.5 ${cardClass}`}>
-                    <View className="flex-row justify-between items-center">
-                      <TouchableOpacity
-                        disabled={!isLeader}
-                        onPress={() => handleInspectMember(m.userId)}
-                        className="flex-1 pr-2"
-                      >
-                        <View className="flex-row items-center gap-2 flex-wrap">
-                          <Text className={`font-extrabold text-sm ${textMain}`}>{m.fullName}</Text>
-                          {!m.isActive && <Text className="rounded bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">Si hai</Text>}
-                          <View className="bg-teal-600/15 px-2 py-0.5 rounded-md">
-                            <Text className="text-[10px] font-bold text-teal-700">{getRoleLabel(m.role)}</Text>
-                          </View>
-                        </View>
-                        <Text className={`text-xs mt-1 font-semibold ${textSub}`}>
-                          Simu: <Text className="text-teal-600 font-bold">{m.phone}</Text> • Alijiunga:{' '}
-                          {new Date(m.joinedAt).toLocaleDateString('sw-TZ')}
-                        </Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        onPress={() => setContactMember(m)}
-                        className="bg-teal-700 px-3.5 py-2.5 rounded-xl flex-row items-center gap-1.5 shadow-sm"
-                      >
-                        <Ionicons name="chatbubbles-outline" size={16} color="#ffffff" />
-                        <Text className="text-white font-bold text-xs">Mawasiliano</Text>
-                      </TouchableOpacity>
+                  <View key={m.memberId} className={`mb-3 rounded-2xl border p-4 ${cardClass}`}>
+                    <View className="flex-row items-center gap-3">
+                      <View className={`h-11 w-11 items-center justify-center rounded-full ${isDark ? 'bg-teal-950' : 'bg-teal-100'}`}>
+                        <Text className={`font-extrabold ${isDark ? 'text-teal-200' : 'text-teal-900'}`}>{initials || '•'}</Text>
+                      </View>
+                      <View className="flex-1">
+                        <Text className={`text-base font-extrabold ${textMain}`}>{m.fullName}</Text>
+                        <Text className={`mt-0.5 text-xs ${textSub}`}>{getRoleLabel(m.role)}{m.phone ? ' · ' + m.phone : ''}</Text>
+                      </View>
+                      {!m.isActive && <Text className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">Si hai</Text>}
                     </View>
-
-                    {!m.isActive && m.suspensionReason ? <Text className={'mt-2 text-xs ' + textSub}>{m.suspensionReason}</Text> : null}
-                    {isChairperson && m.userId !== user?.id && m.role !== 'CHAIRPERSON' && <MemberStatusForm member={m} reload={loadOffice} />}
-                    {isChairperson && m.isActive && m.userId !== user?.id && m.role !== 'CHAIRPERSON' && (
-                      <MemberPinReset key={scope + m.userId} userId={m.userId} name={m.fullName} />
+                    {!m.isActive && m.suspensionReason ? <Text className={`mt-2 text-xs ${textSub}`}>{m.suspensionReason}</Text> : null}
+                    <View className="mt-3 flex-row flex-wrap gap-2">
+                      <OfficeAction icon="chatbubbles-outline" label="Mawasiliano" dark={isDark} onPress={() => setContactMember(m)} />
+                      {isLeader && <OfficeAction icon="receipt-outline" label="Taarifa" dark={isDark} selected={isAuditing} onPress={() => void handleInspectMember(m.userId)} />}
+                      {canManage && <OfficeAction icon="settings-outline" label="Simamia" dark={isDark} selected={isManaging}
+                        onPress={() => setManageMember(isManaging ? null : manageKey)} />}
+                    </View>
+                    {canManage && isManaging && (
+                      <View className={`mt-3 rounded-xl border p-3 ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-slate-50'}`}>
+                        <Text className={`font-bold ${textMain}`}>Usimamizi wa uanachama</Text>
+                        {m.isActive && <MemberPinReset key={manageKey} userId={m.userId} name={m.fullName} />}
+                        <MemberStatusForm member={m} reload={loadOffice} />
+                      </View>
                     )}
                     {isLeader && isAuditing && (
                       <View className="mt-3 pt-3 border-t border-slate-200/30 bg-teal-600/10 p-3 rounded-xl">
@@ -491,23 +508,13 @@ export default function WanachamaSheriaScreen() {
           {activeSection === 'RULES' && (
             <>
               <View className={`p-4 rounded-2xl border mb-4 ${cardClass}`}>
-                <View className="flex-row justify-between items-center mb-3">
-                  <Text className="text-xs font-extrabold text-teal-600 uppercase">
-                    Sheria Kuu za Fedha za Kikundi
-                  </Text>
-                  {isChairperson && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        setRulesForm(group || {});
-                        setIsEditingRules(!isEditingRules);
-                      }}
-                      className="bg-teal-700 px-3 py-1.5 rounded-lg"
-                    >
-                      <Text className="text-white font-bold text-[11px]">
-                        {isEditingRules ? 'Ghairi' : 'Hariri Sheria Zote'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
+                <View className="mb-4 flex-row flex-wrap items-center justify-between gap-2">
+                  <Text className={`flex-1 text-base font-extrabold ${textMain}`}>Sheria za fedha</Text>
+                  {isChairperson && <OfficeAction dark={isDark} icon={isEditingRules ? 'close-outline' : 'create-outline'}
+                    label={isEditingRules ? 'Ghairi' : 'Hariri sheria'} primary={!isEditingRules} onPress={() => {
+                      setRulesForm(group || {});
+                      setIsEditingRules(!isEditingRules);
+                    }} />}
                 </View>
 
                 {!isEditingRules ? (
@@ -828,54 +835,25 @@ export default function WanachamaSheriaScreen() {
 
           {activeSection === 'CONSTITUTION' && (
             <View className={`p-4 rounded-2xl border mb-6 ${cardClass}`}>
-              <View className="flex-row justify-between items-center mb-3">
-                <View className="flex-row items-center gap-2">
-                  <Ionicons name="book" size={18} color="#0f766e" />
-                  <Text className={`font-extrabold text-sm ${textMain}`}>Katiba ya Kikoba</Text>
-                </View>
-                <View className="flex-row gap-2">
-                  <TouchableOpacity
-                    disabled={sharingConstitution}
-                    onPress={handleShareConstitutionPdf}
-                    className="bg-indigo-600 px-3 py-1.5 rounded-xl flex-row items-center gap-1"
-                  >
-                    <Ionicons name="share-social-outline" size={14} color="#fff" />
-                    <Text className="text-white font-bold text-xs">{sharingConstitution ? 'Inaandaa PDF...' : 'Shiriki PDF'}</Text>
-                  </TouchableOpacity>
-                  {isChairperson && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        if (!isEditingConstitution) setConstitutionDraft(group?.constitution || '');
-                        setIsEditingConstitution(!isEditingConstitution);
-                      }}
-                      className="bg-teal-700 px-3 py-1.5 rounded-xl"
-                    >
-                      <Text className="text-white font-bold text-xs">
-                        {isEditingConstitution ? 'Ghairi' : 'Hariri'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+              <View className="mb-3 flex-row items-center gap-2">
+                <View className="rounded-xl bg-teal-100 p-2"><Ionicons name="book-outline" size={20} color="#115e59" /></View>
+                <Text className={`text-base font-extrabold ${textMain}`}>Katiba ya Kikoba</Text>
               </View>
-
-              {isChairperson && (
-                <View className="flex-row gap-2 mb-3">
-                  <TouchableOpacity
-                    onPress={handlePickConstitutionDoc}
-                    className="flex-1 bg-teal-600/15 border border-teal-600/30 p-3 rounded-xl flex-row items-center justify-center gap-1.5"
-                  >
-                    <Ionicons name="cloud-upload-outline" size={16} color="#0f766e" />
-                    <Text className="text-teal-800 font-bold text-[11px]">Pakia Faili</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={handleUseConstitutionTemplate}
-                    className="flex-1 bg-amber-500/15 border border-amber-500/30 p-3 rounded-xl flex-row items-center justify-center gap-1.5"
-                  >
-                    <Ionicons name="sparkles-outline" size={16} color="#b45309" />
-                    <Text className="text-amber-900 font-bold text-[11px]">Kiolezo cha Katiba</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+              <View className="mb-4 flex-row flex-wrap gap-2">
+                <OfficeAction icon="share-social-outline" primary dark={isDark} disabled={sharingConstitution}
+                  label={sharingConstitution ? 'Inaandaa PDF...' : 'Shiriki PDF'} onPress={() => void handleShareConstitutionPdf()} />
+                {isChairperson && <>
+                  <OfficeAction icon={isEditingConstitution ? 'close-outline' : 'create-outline'} dark={isDark}
+                    label={isEditingConstitution ? 'Ghairi' : 'Hariri'} onPress={() => {
+                      if (!isEditingConstitution) setConstitutionDraft(group?.constitution || '');
+                      setIsEditingConstitution(!isEditingConstitution);
+                    }} />
+                  {isEditingConstitution && <>
+                    <OfficeAction icon="cloud-upload-outline" label="Pakia faili" dark={isDark} onPress={() => void handlePickConstitutionDoc()} />
+                    <OfficeAction icon="document-text-outline" label="Tumia kiolezo" dark={isDark} onPress={handleUseConstitutionTemplate} />
+                  </>}
+                </>}
+              </View>
 
               {isEditingConstitution ? (
                 <>

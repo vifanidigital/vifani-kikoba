@@ -12,3 +12,12 @@ export function papoPayment(entry: { principalAmount: number; totalPayable: numb
 export function outstandingPapoPrincipal(entry: { principalAmount: number; totalPayable: number; amountPaid: number }) {
   return Math.max(0, cents(entry.principalAmount) - Math.max(0, cents(entry.amountPaid) - (cents(entry.totalPayable) - cents(entry.principalAmount)))) / 100;
 }
+
+export function optionalPapoBalance(total: number, largeLoansOut: number, optionalPapoOut: number) {
+  return {
+    outstanding: optionalPapoOut,
+    balanceWithPapo: Math.max(0, total),
+    balanceWithoutPapo: Math.max(0, total - optionalPapoOut),
+    cashAvailable: Math.max(0, total - largeLoansOut - optionalPapoOut),
+  };
+}

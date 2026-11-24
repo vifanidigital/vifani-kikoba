@@ -1,4 +1,4 @@
-import { outstandingPapoPrincipal } from '../lib/papoPayment';
+import { optionalPapoBalance, outstandingPapoPrincipal } from '../lib/papoPayment';
 import { currentLoanQuote, RepaymentPlan } from '../lib/loanRepayment';
 import historicalMeetings from './historicalMeetings';
 import { localDate, meetingDateForWeek, meetingDayEnd, parseMeetingDate } from '../lib/meetingCalendar';
@@ -135,10 +135,12 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
         totalGroupExpenses
     );
     const totalLoansOut = loansPrincipalOut + papoTopUpOut;
+    const papoBalance = optionalPapoBalance(totalGroupBalance, loansPrincipalOut, papoTopUpOut);
 
     res.json({
       totalGroupBalance,
-      cashInHand: Math.max(0, totalGroupBalance - totalLoansOut),
+      cashInHand: papoBalance.cashAvailable,
+      papoBalance,
       totalLoansOut,
       mySharesValue: myShares._sum.amountPaid || 0,
       mySharesCount: myShares._sum.sharesCount || 0,

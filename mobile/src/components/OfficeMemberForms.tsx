@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Alert, Pressable, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { isAxiosError } from 'axios';
 import { apiClient } from '../api/client';
 import { FormTextInput } from './KeyboardForm';
@@ -42,10 +43,11 @@ export function AddMemberForm({ reload }: { reload: () => Promise<void> }) {
   };
 
   return (
-    <View className="mb-4">
+    <View className="mb-2">
       {!open ? (
-        <Pressable accessibilityRole="button" onPress={() => setOpen(true)} className="self-start rounded-xl bg-teal-800 px-4 py-3">
-          <Text className="font-bold text-white">Ongeza Mwanachama</Text>
+        <Pressable accessibilityRole="button" onPress={() => setOpen(true)} className="min-h-11 flex-row items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5">
+          <Ionicons name="person-add-outline" size={17} color="#ffffff" />
+          <Text className="font-bold text-white">Ongeza mwanachama</Text>
         </Pressable>
       ) : (
         <>
@@ -124,13 +126,18 @@ export function MemberStatusForm({ member, reload }: {
           </View>
         </>
       ) : (
-        <Pressable accessibilityRole="button" disabled={saving} onPress={() => member.isActive ? setOpen(true) : void submit(true)} className="self-start rounded-xl border border-teal-600 px-3 py-2">
-          <Text className={textClass}>{member.isActive ? 'Simamisha uanachama' : 'Rejesha uanachama'}</Text>
-        </Pressable>
+        <View className="flex-row flex-wrap gap-2">
+          <Pressable accessibilityRole="button" disabled={saving} onPress={() => member.isActive ? setOpen(true) : void submit(true)}
+            className="min-h-11 flex-row items-center gap-2 rounded-xl border border-teal-600 px-3 py-2">
+            <Ionicons name={member.isActive ? 'pause-circle-outline' : 'play-circle-outline'} size={17} color="#0d9488" />
+            <Text className={'text-xs font-bold ' + textClass}>{member.isActive ? 'Simamisha' : 'Rejesha uanachama'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" disabled={saving} onPress={remove} className="min-h-11 flex-row items-center gap-2 rounded-xl border border-rose-500 px-3 py-2">
+            <Ionicons name="person-remove-outline" size={17} color="#e11d48" />
+            <Text className={isDark ? 'text-xs font-bold text-rose-300' : 'text-xs font-bold text-rose-700'}>Ondoa mwanachama</Text>
+          </Pressable>
+        </View>
       )}
-      {!open && <Pressable accessibilityRole="button" disabled={saving} onPress={remove} className="mt-2 self-start rounded-xl border border-rose-600 px-3 py-2">
-        <Text className="font-bold text-rose-600">Ondoa mwanachama</Text>
-      </Pressable>}
       {error ? <Text accessibilityRole="alert" className="mt-2 text-rose-600">{error}</Text> : null}
     </View>
   );
