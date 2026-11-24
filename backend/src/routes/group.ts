@@ -164,12 +164,12 @@ router.put('/constitution', authenticateToken, async (req: AuthRequest, res: Res
 });
 
 // 4. MWENYEKITI KUSASISHA SHERIA NA FAINI
-router.patch('/papo-balance-display', authenticateToken, async (req: AuthRequest, res: Response) => {
+router.patch('/mandatory-papo-balance-display', authenticateToken, async (req: AuthRequest, res: Response) => {
   if (req.user!.role !== 'CHAIRPERSON') return res.status(403).json({ error: 'Mwenyekiti pekee anaweza kubadili mwonekano wa salio.' });
   const input = z.object({ show: z.boolean() }).safeParse(req.body);
   if (!input.success) return res.status(400).json({ error: 'Chagua kuonyesha au kuficha Papo.' });
-  const group = await prisma.group.update({ where: { id: req.user!.groupId }, data: { showOptionalPapoInBalance: input.data.show },
-    select: { showOptionalPapoInBalance: true } });
+  const group = await prisma.group.update({ where: { id: req.user!.groupId }, data: { showMandatoryPapoInBalance: input.data.show },
+    select: { showMandatoryPapoInBalance: true } });
   res.json(group);
 });
 

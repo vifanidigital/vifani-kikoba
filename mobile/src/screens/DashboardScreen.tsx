@@ -175,21 +175,22 @@ export default function DashboardScreen() {
 
 
   const b = summary?.breakdown || {};
-  const optionalPapo = Number(summary?.papoBalance?.outstanding ?? summary?.optionalPapoOutstanding ?? 0);
-  const showOptionalPapo = groupSettings?.showOptionalPapoInBalance === true;
+  const optionalPapo = Number(summary?.optionalPapoOutstanding ?? 0);
+  const mandatoryPapo = Number(summary?.mandatoryPapo?.outstanding ?? b.totalPapoMandatory ?? 0);
+  const showMandatoryPapo = groupSettings?.showMandatoryPapoInBalance === true;
   const canManagePapo = (groupSettings?.viewerRole ?? activeRole) === 'CHAIRPERSON';
-  const excludedPapo = showOptionalPapo ? 0 : optionalPapo;
-  const groupBalance = showOptionalPapo
-    ? summary?.papoBalance?.balanceWithPapo ?? summary?.totalGroupBalance
-    : summary?.papoBalance?.balanceWithoutPapo ?? Math.max(0, Number(summary?.totalGroupBalance || 0) - optionalPapo);
+  const excludedPapo = showMandatoryPapo ? 0 : mandatoryPapo;
+  const groupBalance = showMandatoryPapo
+    ? summary?.mandatoryPapo?.balanceWithPapo ?? summary?.totalGroupBalance
+    : summary?.mandatoryPapo?.balanceWithoutPapo ?? Math.max(0, Number(summary?.totalGroupBalance || 0) - mandatoryPapo);
   const togglePapoBalance = async () => {
     if (savingPapoDisplay) return;
     setSavingPapoDisplay(true);
     try {
       const groupId = activeGroup?.id;
-      const { data } = await apiClient.patch<{ showOptionalPapoInBalance: boolean }>('/group/papo-balance-display', { show: !showOptionalPapo });
+      const { data } = await apiClient.patch<{ showMandatoryPapoInBalance: boolean }>('/group/mandatory-papo-balance-display', { show: !showMandatoryPapo });
       setGroupSettings((previous: { id?: string } | null) => previous?.id === groupId
-        ? { ...previous, showOptionalPapoInBalance: data.showOptionalPapoInBalance } : previous);
+        ? { ...previous, showMandatoryPapoInBalance: data.showMandatoryPapoInBalance } : previous);
     } catch (error) {
       const detail = isAxiosError(error) ? error.response?.data?.error : undefined;
       Alert.alert('Hitilafu', typeof detail === 'string' ? detail : 'Imeshindikana kubadili mwonekano wa salio la Papo.');
@@ -333,29 +334,33 @@ export default function DashboardScreen() {
                 </Text>
               </View>
             </View>
-            {(canManagePapo || showOptionalPapo) && (
+            <View className="mt-3 flex-row justify-between gap-2 border-t border-slate-800 pt-3">
+              <Text className="text-sm text-slate-300">Papo ya hiari iliyo kwa wanachama</Text>
+              <Text className="font-bold text-amber-300">{formatMoney(optionalPapo)}</Text>
+            </View>
+            {(canManagePapo || showMandatoryPapo) && (
               <View className="mt-4 rounded-2xl border border-slate-700 bg-slate-800/70 p-3">
                 <View className="flex-row items-center justify-between gap-3">
                   <View className="flex-1">
-                    <Text className="font-bold text-white">Papo ya hiari</Text>
-                    <Text className="mt-0.5 text-xs text-slate-300">{showOptionalPapo ? 'Imejumuishwa kwenye jumla' : 'Imetengwa kwenye jumla'}</Text>
+                    <Text className="font-bold text-white">Papo ya lazima</Text>
+                    <Text className="mt-0.5 text-xs text-slate-300">{showMandatoryPapo ? 'Imejumuishwa kwenye jumla' : 'Imetengwa kwenye jumla'}</Text>
                   </View>
                   {canManagePapo && (
-                    <TouchableOpacity accessibilityRole="switch" accessibilityLabel="Onyesha Papo ya hiari kwenye jumla"
-                      accessibilityState={{ checked: showOptionalPapo, disabled: savingPapoDisplay || !groupSettings }}
+                    <TouchableOpacity accessibilityRole="switch" accessibilityLabel="Onyesha Papo ya lazima kwenye jumla"
+                      accessibilityState={{ checked: showMandatoryPapo, disabled: savingPapoDisplay || !groupSettings }}
                       onPress={() => void togglePapoBalance()} disabled={savingPapoDisplay || !groupSettings}
                       className="min-h-10 justify-center rounded-xl bg-teal-700 px-3">
-                      <Text className="font-bold text-white">{savingPapoDisplay ? 'Inahifadhi...' : showOptionalPapo ? 'Ficha' : 'Onyesha'}</Text>
+                      <Text className="font-bold text-white">{savingPapoDisplay ? 'Inahifadhi...' : showMandatoryPapo ? 'Ficha' : 'Onyesha'}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
-                {showOptionalPapo && <View className="mt-3 flex-row justify-between gap-3 border-t border-slate-600 pt-2">
+                {showMandatoryPapo && <View className="mt-3 flex-row justify-between gap-3 border-t border-slate-600 pt-2">
                   <Text className="flex-1 text-sm text-slate-200">Kiasi kilicho kwa wanachama</Text>
-                  <Text className="font-bold text-amber-300">{formatMoney(optionalPapo)}</Text>
+                  <Text className="font-bold text-amber-300">{formatMoney(mandatoryPapo)}</Text>
                 </View>}
-                {showOptionalPapo && hideBalances && <Text className="mt-2 text-xs text-slate-300">Gusa Onyesha salio juu ili kuona kiasi.</Text>}
-                {showOptionalPapo && !hideBalances && optionalPapo === 0 && (
-                  <Text className="mt-2 text-xs text-slate-300">Hakuna salio la Papo ya hiari lililorekodiwa kuwa nje.</Text>
+                {showMandatoryPapo && hideBalances && <Text className="mt-2 text-xs text-slate-300">Gusa Onyesha salio juu ili kuona kiasi.</Text>}
+                {showMandatoryPapo && !hideBalances && mandatoryPapo === 0 && (
+                  <Text className="mt-2 text-xs text-slate-300">Hakuna salio la Papo ya lazima lililorekodiwa kuwa nje.</Text>
                 )}
               </View>
             )}
@@ -446,7 +451,7 @@ export default function DashboardScreen() {
                 </View>
                 <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
                   <Text className={`text-xs ${textSub}`}>2. Mfuko wa Papo (Mtaji):</Text>
-                  <Text className={`text-xs font-bold ${textMain}`}>{formatMoney(b.totalPapoMandatory)}</Text>
+                  <Text className={`text-xs font-bold ${textMain}`}>{showMandatoryPapo ? formatMoney(mandatoryPapo) : 'Imetengwa'}</Text>
                 </View>
                 <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
                   <Text className={`text-xs ${textSub}`}>3. Mfuko wa Jamii:</Text>

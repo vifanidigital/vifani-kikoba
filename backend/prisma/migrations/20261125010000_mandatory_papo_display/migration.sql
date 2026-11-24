@@ -1,0 +1,1 @@
+ALTER TABLE "Group" ADD COLUMN IF NOT EXISTS "showMandatoryPapoInBalance" BOOLEAN NOT NULL DEFAULT false;

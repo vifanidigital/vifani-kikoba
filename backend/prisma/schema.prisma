@@ -62,6 +62,7 @@ model Group {
   socialFundMax       Float    @default(0)
 
   showOptionalPapoInBalance Boolean @default(false)
+  showMandatoryPapoInBalance Boolean @default(false)
   hasPapo             Boolean  @default(false)
   mandatoryPapoAmount Float    @default(0)
   papoMeetingInterest Float    @default(10)
