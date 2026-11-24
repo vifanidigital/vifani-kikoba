@@ -6,7 +6,15 @@ import { apiClient } from '../api/client';
 import { useTheme } from '../context/ThemeContext';
 import { FormTextInput } from './KeyboardForm';
 
-type Schedule = { startDate: string | null; weekday: number; dates: string[] };
+type ScheduleEntry = { date: string; filled: number; total: number; complete: boolean };
+type Schedule = {
+  startDate: string | null; startWeekday?: number | null; firstMeetingDate?: string | null;
+  weekday: number; dates: string[]; sessions?: ScheduleEntry[];
+};
+function formatDateInput(value: string) {
+  const digits = value.replace(/[^0-9]/g, '').slice(0, 8);
+  return [digits.slice(0, 4), digits.slice(4, 6), digits.slice(6, 8)].filter(Boolean).join('-');
+}
 type Member = {
   userId: string;
   fullName: string;
@@ -42,9 +50,13 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
   const [memberId, setMemberId] = useState<string | null>(null);
   const [draft, setDraft] = useState(empty);
   const [limit, setLimit] = useState(8);
+  const [showCompleted, setShowCompleted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const entries = schedule?.sessions ?? (schedule?.dates ?? []).map(date => ({ date, total: 0, filled: 0, complete: false }));
+  const pending = entries.filter(entry => !entry.complete);
+  const visible = showCompleted ? entries : pending;
   const textColor = isDark ? 'text-white' : 'text-slate-900';
 
   const request = async (work: () => Promise<void>) => {
@@ -67,12 +79,14 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
   };
 
   const saveStart = () => void request(async () => {
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(start)) { setError('Andika tarakimu nane za tarehe, mfano 20261101.'); return; }
     const { data } = await apiClient.put<Schedule>('/shares/historical-meetings/start', { startDate: start.trim() });
     setSchedule(data);
     setPicked('');
     setSession(null);
     setMemberId(null);
     setLimit(8);
+    setShowCompleted(false);
     await refresh();
   });
 
@@ -107,6 +121,12 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
       setMemberId(null);
       setDraft(empty);
       setMessage('Rekodi imehifadhiwa kwa tarehe ' + picked + '.');
+      try {
+        const { data } = await apiClient.get<Schedule>('/shares/historical-meetings');
+        setSchedule(data);
+      } catch {
+        setMessage('Rekodi imehifadhiwa. Fungua ratiba tena kusasisha idadi ya vikao.');
+      }
     });
   };
 
@@ -122,24 +142,43 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
             <Text className={'font-bold ' + textColor}>Vikao vya Nyuma</Text>
             <Pressable accessibilityRole="button" disabled={loading} onPress={() => setOpen(false)} className="p-2"><Text className={textColor}>Funga</Text></Pressable>
           </View>
-          <Text className={'text-sm ' + textColor}>Tarehe mliyoanza mzunguko (YYYY-MM-DD)</Text>
-          <FormTextInput accessibilityLabel="Tarehe ya kuanza mzunguko" placeholder="2026-01-08" placeholderTextColor="#64748b" keyboardType="numbers-and-punctuation" autoCorrect={false} maxLength={10} value={start} editable={!loading} onChangeText={setStart} className={'my-2 rounded-xl border border-slate-400 p-3 ' + textColor} />
+          <Text className={'text-sm ' + textColor}>Tarehe mliyoanza mzunguko (mwaka, mwezi, siku)</Text>
+          <Text className={'mt-1 text-xs ' + textColor}>Taarifa zitajazwa kwenye mzunguko ulio wazi.</Text>
+          <FormTextInput accessibilityLabel="Tarehe ya kuanza mzunguko" placeholder="2026-01-08" placeholderTextColor="#64748b" keyboardType="number-pad" autoCorrect={false} maxLength={10} value={start} editable={!loading} onChangeText={value => setStart(formatDateInput(value))} className={'my-2 rounded-xl border border-slate-400 p-3 ' + textColor} />
           <Pressable accessibilityRole="button" onPress={saveStart} disabled={loading} className="self-start rounded-xl bg-teal-800 px-4 py-3"><Text className="font-bold text-white">Fungua Ratiba ya Nyuma</Text></Pressable>
           {loading && <ActivityIndicator className="mt-3" color="#0f766e" />}
           {error ? <Text accessibilityRole="alert" className="mt-3 text-rose-600">{error}</Text> : null}
           {message ? <Text accessibilityRole="alert" className="mt-3 text-teal-600">{message}</Text> : null}
           {schedule?.startDate && (
             <View className="mt-4">
-              <Text className={'mb-2 font-bold ' + textColor}>Vikao vya {days[schedule.weekday]} kuanzia {schedule.startDate}</Text>
-              {schedule.dates.length === 0 && <Text className={textColor}>Hakuna tarehe ya kikao cha nyuma kwenye kipindi hiki.</Text>}
+              <Text className={'mb-2 font-bold ' + textColor}>
+                Siku ya kikao: {days[schedule.weekday] ?? 'Haijawekwa'} · Majuma {entries.length} · Yaliyobaki {pending.length}
+              </Text>
+              {schedule.startWeekday != null && (
+                <Text className={'mb-2 ' + textColor}>
+                  {schedule.startWeekday === schedule.weekday ? 'Tarehe uliyoingiza inalingana na siku ya kikao.' :
+                    'Tarehe uliyoingiza ilikuwa ' + days[schedule.startWeekday] + '.' + (schedule.firstMeetingDate ? ' Kikao cha kwanza kinacholingana ni ' + schedule.firstMeetingDate + '.' : '')}
+                </Text>
+              )}
+              {!entries.length && <Text className={textColor}>Hakuna kikao kilichopita kwenye kipindi hiki.</Text>}
+              {!!entries.length && !pending.length && !showCompleted && <Text className={textColor}>Vikao vyote vimejazwa.</Text>}
+              {entries.some(entry => entry.complete) && (
+                <Pressable accessibilityRole="button" onPress={() => { setShowCompleted(!showCompleted); setLimit(8); }} className="self-start py-2">
+                  <Text className={textColor}>{showCompleted ? 'Onyesha vilivyobaki pekee' : 'Onyesha pia vikao vilivyojazwa'}</Text>
+                </Pressable>
+              )}
               <View className="flex-row flex-wrap gap-2">
-                {schedule.dates.slice(0, limit).map(date => (
-                  <Pressable key={date} accessibilityRole="button" accessibilityState={{ selected: date === picked }} disabled={loading} onPress={() => chooseDate(date)} className={date === picked ? 'rounded-lg bg-teal-800 p-2' : 'rounded-lg border border-slate-400 p-2'}>
-                    <Text className={date === picked ? 'font-bold text-white' : textColor}>{date}</Text>
+                {visible.slice(0, limit).map(entry => (
+                  <Pressable key={entry.date} accessibilityRole="button" accessibilityState={{ selected: entry.date === picked }} disabled={loading}
+                    onPress={() => chooseDate(entry.date)} className={entry.date === picked ? 'rounded-lg bg-teal-800 p-2' : 'rounded-lg border border-slate-400 p-2'}>
+                    <Text className={entry.date === picked ? 'font-bold text-white' : textColor}>
+                      {entry.date}{entry.total ? ' · ' + entry.filled + '/' + entry.total : ''}{entry.complete ? ' · Kimejazwa' : ''}
+                    </Text>
                   </Pressable>
                 ))}
               </View>
-              {limit < schedule.dates.length && <Pressable accessibilityRole="button" onPress={() => setLimit(limit + 8)} className="self-start py-3"><Text className={textColor}>Onyesha tarehe zaidi</Text></Pressable>}
+              {limit < visible.length && <Pressable accessibilityRole="button" onPress={() => setLimit(limit + 8)} className="self-start py-3"><Text className={textColor}>Onyesha tarehe zaidi</Text></Pressable>}
+
             </View>
           )}
           {session && (

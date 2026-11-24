@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { historicalSchedule, localDate, meetingDayEnd, parseMeetingDate } from '../lib/meetingCalendar';
+import { historicalSchedule, meetingProgress, meetingWeekday, localDate, meetingDayEnd, parseMeetingDate } from '../lib/meetingCalendar';
 import { addMonths } from '../lib/subscription';
 import { authenticateToken, type AuthRequest } from '../middlewares/auth';
 
@@ -15,32 +15,45 @@ router.use(authenticateToken, (req: AuthRequest, res, next) => {
   next();
 });
 
-const groupFields = { cycleStartedAt: true, historicalMeetingStart: true, historicalMeetingWeekday: true, meetingDayOfWeek: true, hasPapo: true } as const;
+const groupFields = { historicalMeetingStart: true, historicalMeetingWeekday: true, meetingDayOfWeek: true, hasPapo: true } as const;
 const todayInTanzania = () => parseMeetingDate(localDate(new Date()))!;
+
+async function scheduleResponse(groupId: string, start: Date | null, weekday: number) {
+  const today = todayInTanzania();
+  const newestFirst = start ? historicalSchedule(start, weekday, today) : [];
+  const dates = [...newestFirst].reverse();
+  const [members, records] = start && dates.length ? await Promise.all([
+    prisma.groupMember.findMany({ where: { groupId, isActive: true }, select: { userId: true } }),
+    prisma.shareRecord.findMany({
+      where: { groupId, meetingDate: { gte: start, lt: today } },
+      select: { userId: true, meetingDate: true },
+    }),
+  ]) : [[], []];
+  const sessions = meetingProgress(dates, members.map(member => member.userId), records);
+  return {
+    startDate: start ? localDate(start) : null, startWeekday: start ? meetingWeekday(start) : null,
+    weekday, firstMeetingDate: dates[0] ?? null, dates, sessions,
+    totalWeeks: sessions.length, remainingWeeks: sessions.filter(session => !session.complete).length,
+  };
+}
 
 router.get('/', async (req: AuthRequest, res) => {
   const groupId = req.user!.groupId;
   const group = await prisma.group.findUnique({ where: { id: groupId }, select: groupFields });
   if (!group) return res.sendStatus(404);
-  const weekday = group.historicalMeetingWeekday ?? group.meetingDayOfWeek;
-  const start = group.historicalMeetingStart;
-  const dates = start ? historicalSchedule(start, weekday, todayInTanzania()) : [];
-  res.json({ startDate: start ? localDate(start) : null, weekday, dates });
+  res.json(await scheduleResponse(groupId, group.historicalMeetingStart, group.historicalMeetingWeekday ?? group.meetingDayOfWeek));
 });
 
 router.put('/start', async (req: AuthRequest, res) => {
   const input = z.object({ startDate: z.string() }).safeParse(req.body);
   const date = input.success ? parseMeetingDate(input.data.startDate) : null;
   const today = todayInTanzania();
-  if (!date || date >= today || date < addMonths(today, -60)) {
-    return res.status(400).json({ error: 'Weka tarehe halali ya nyuma ndani ya miaka mitano (YYYY-MM-DD).' });
-  }
+  if (!date) return res.status(400).json({ error: 'Tarehe si halali. Tumia mpangilio wa mwaka, mwezi na siku.' });
+  if (date >= today) return res.status(400).json({ error: 'Chagua tarehe kabla ya leo. Taarifa za leo zinajazwa kwenye kikao cha leo.' });
+  if (date < addMonths(today, -60)) return res.status(400).json({ error: 'Chagua tarehe iliyo ndani ya miaka mitano iliyopita.' });
   const groupId = req.user!.groupId;
   const group = await prisma.group.findUnique({ where: { id: groupId }, select: groupFields });
   if (!group) return res.sendStatus(404);
-  if (group.cycleStartedAt && localDate(date) < localDate(group.cycleStartedAt)) {
-    return res.status(400).json({ error: 'Tarehe hiyo iko kabla ya mzunguko mpya.' });
-  }
   const weekday = group.historicalMeetingWeekday ?? group.meetingDayOfWeek;
   if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return res.status(400).json({ error: 'Kwanza weka siku halali ya kikao kwenye Ofisi na Sheria.' });
   if (group.historicalMeetingStart && date > group.historicalMeetingStart) {
@@ -48,13 +61,13 @@ router.put('/start', async (req: AuthRequest, res) => {
     if (before) return res.status(409).json({ error: 'Tarehe hiyo ingeondoa vikao vyenye rekodi kwenye orodha.' });
   }
   await prisma.group.update({ where: { id: groupId }, data: { historicalMeetingStart: date, historicalMeetingWeekday: weekday } });
-  res.json({ startDate: localDate(date), weekday, dates: historicalSchedule(date, weekday, today) });
+  res.json(await scheduleResponse(groupId, date, weekday));
 });
 
 function isScheduled(date: Date, group: { historicalMeetingStart: Date | null; historicalMeetingWeekday: number | null; meetingDayOfWeek: number }) {
   const start = group.historicalMeetingStart;
   return Boolean(start && date >= start && date < todayInTanzania() &&
-    new Date(date.getTime() + 3 * 3600000).getUTCDay() === (group.historicalMeetingWeekday ?? group.meetingDayOfWeek));
+    meetingWeekday(date) === (group.historicalMeetingWeekday ?? group.meetingDayOfWeek));
 }
 
 router.get('/:date', async (req: AuthRequest, res) => {
@@ -165,6 +178,11 @@ router.post('/:date', async (req: AuthRequest, res) => {
     }
     throw error;
   }
+});
+
+router.use((error: unknown, _req: AuthRequest, res: import('express').Response, _next: import('express').NextFunction) => {
+  console.error('Historical meetings request failed', error instanceof Error ? error.name : 'Unknown');
+  res.status(500).json({ error: 'Seva imeshindwa kupakia kikao. Jaribu tena.' });
 });
 
 export default router;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { historicalSchedule, localDate, meetingDayEnd, parseMeetingDate } from '../src/lib/meetingCalendar';
+import { historicalSchedule, localDate, meetingDayEnd, meetingProgress, meetingWeekday, parseMeetingDate } from '../src/lib/meetingCalendar';
 
 test('backfills only the configured weekly meeting day before today', () => {
   const today = parseMeetingDate('2026-11-19')!;
@@ -14,4 +14,20 @@ test('validates dates and uses East Africa midnight for ledger bounds', () => {
   const meeting = parseMeetingDate('2028-02-29')!;
   assert.equal(meeting.toISOString(), '2028-02-28T21:00:00.000Z');
   assert.equal(localDate(meetingDayEnd(meeting)), '2028-03-01');
+});
+
+test('Sunday start aligns to the next Thursday and reports only unfinished weeks', () => {
+  const parsed = (date: string) => parseMeetingDate(date)!;
+  const start = parsed('2026-11-01');
+  assert.equal(meetingWeekday(start), 0);
+  const dates = historicalSchedule(start, 4, parsed('2026-11-24')).reverse();
+  assert.deepEqual(dates, ['2026-11-05', '2026-11-12', '2026-11-19']);
+  const progress = meetingProgress(dates, ['a', 'b'], [
+    { userId: 'a', meetingDate: parsed(dates[0]) },
+    { userId: 'a', meetingDate: parsed(dates[0]) },
+    { userId: 'b', meetingDate: parsed(dates[0]) },
+    { userId: 'a', meetingDate: parsed(dates[1]) },
+    { userId: 'inactive', meetingDate: parsed(dates[1]) },
+  ]);
+  assert.deepEqual(progress.map(({ filled, complete }) => [filled, complete]), [[2, true], [1, false], [0, false]]);
 });
