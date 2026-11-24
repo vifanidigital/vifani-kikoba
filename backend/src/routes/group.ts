@@ -99,10 +99,10 @@ router.get('/member-audit/:targetUserId', authenticateToken, async (req: AuthReq
         where: { userId_groupId: { userId: targetUserId, groupId } },
       }),
       prisma.loan.findMany({
-        where: { groupId, userId: targetUserId, status: { in: ['DISBURSED', 'OVERDUE', 'REPAYMENT_PENDING'] } },
+        where: { groupId, userId: targetUserId, status: { in: ['DISBURSED', 'OVERDUE', 'REPAYMENT_PENDING', 'PENDING'] } },
       }),
       prisma.papoTopUp.findMany({
-        where: { groupId, userId: targetUserId, status: { in: ['ACTIVE', 'OVERDUE', 'REPAYMENT_PENDING'] } },
+        where: { groupId, userId: targetUserId, status: { in: ['ACTIVE', 'OVERDUE', 'REPAYMENT_PENDING', 'PENDING'] } },
       }),
       prisma.fineRecord.aggregate({
         where: { groupId, userId: targetUserId, isPaid: false },
@@ -116,8 +116,8 @@ router.get('/member-audit/:targetUserId', authenticateToken, async (req: AuthReq
     ]);
 
     if (!memberInfo) return res.status(404).json({ error: 'Mwanachama hajapatikana kwenye kikundi hiki.' });
-    const loanDebt = activeLoans.reduce((s, l) => s + (currentLoanQuote(l)?.dueBalance ?? Math.max(0, l.totalRepayable - l.amountPaid)), 0);
-    const papoTopUpDebt = activeTopUps.reduce((sum, topUp) => sum + Math.max(0, topUp.totalPayable - topUp.amountPaid), 0);
+    const loanDebt = activeLoans.reduce((s, l) => s + (l.status === 'PENDING' ? l.fundedAmount ?? 0 : currentLoanQuote(l)?.dueBalance ?? Math.max(0, l.totalRepayable - l.amountPaid)), 0);
+    const papoTopUpDebt = activeTopUps.reduce((sum, topUp) => sum + (topUp.status === 'PENDING' ? topUp.fundedAmount ?? 0 : Math.max(0, topUp.totalPayable - topUp.amountPaid)), 0);
     const onTime = interestLedger.filter(row => row.type === 'LOAN_INTEREST_REPAYMENT' && interestTiming(row) === 'ON_TIME').reduce((sum, row) => sum + row.amount, 0);
     const periodicPapo = interestLedger.filter(row => row.type === 'PAPO_INTEREST').reduce((sum, row) => sum + row.amount, 0);
     const topUpInterest = allTopUps.reduce((sum, row) => sum + Math.max(0, Math.min(row.amountPaid, row.totalPayable - row.principalAmount)), 0);

@@ -33,7 +33,10 @@ async function loadCycle(db: CycleDb, groupId: string) {
   if (!group) return null;
   const result = calculateShareOut({
     members: memberships.map(member => ({ userId: member.userId, fullName: member.user.fullName, isActive: member.isActive })),
-    shares, papoAccounts, loans: loans.map(loan => ({ ...loan, totalRepayable: loan.amountPaid + (currentLoanQuote(loan)?.dueBalance ?? (loan.totalRepayable - loan.amountPaid)) })), topUps,
+    shares, papoAccounts, loans: loans.map(loan => loan.status === 'PENDING' && loan.fundedAmount
+      ? { ...loan, status: 'DISBURSED', totalRepayable: loan.fundedAmount }
+      : { ...loan, totalRepayable: loan.amountPaid + (currentLoanQuote(loan)?.dueBalance ?? (loan.totalRepayable - loan.amountPaid)) }),
+    topUps: topUps.map(t => t.status === 'PENDING' && t.fundedAmount ? { ...t, status: 'ACTIVE', totalPayable: t.fundedAmount } : t),
     mandatoryPapoAmount: group.hasPapo ? group.mandatoryPapoAmount : 0,
     periodicPapo: transactions.filter(row => row.type === 'PAPO_INTEREST'),
     interest: transactions.filter(row => row.type === 'LOAN_INTEREST_REPAYMENT'),
@@ -97,6 +100,9 @@ router.post('/cycles/close', authenticateToken, async (req: AuthRequest, res) =>
     const cycle = await loadCycle(tx, groupId);
     if (!cycle || !supported(cycle.group.groupType)) throw new CycleConflict('Kikundi hiki hakina kanuni ya mgao.');
     if (cycle.group.cycleClosedAt) throw new CycleConflict('Mzunguko huu tayari umefungwa.');
+    if ([...cycle.records.loans, ...cycle.records.topUps].some(row => row.status === 'PENDING' && (row.fundedAmount ?? 0) > 0)) {
+      throw new CycleConflict('Malizia maombi yaliyopokea fedha kwa sehemu kabla ya kufunga mzunguko.');
+    }
     if (req.body.token !== previewId(cycle)) throw new CycleConflict('Taarifa za mgao zimebadilika. Pakia upya na uzihakiki.');
     const closedAt = new Date();
     await tx.cycleArchive.create({ data: {

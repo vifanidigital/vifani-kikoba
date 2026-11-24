@@ -19,7 +19,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useTabData } from '../api/useTabData';
 import TopTabs from '../components/TopTabs';
 import TabDataNotice from '../components/TabDataNotice';
-import { DeclineRequest, LoanPaymentPanel, LoanQueuePanel } from '../components/LoanWorkflows';
+import { DeclineRequest, FundingQueuePanel, LoanPaymentPanel, LoanQueuePanel } from '../components/LoanWorkflows';
 import { parsePapo, parseLoans, parseLoanQueue } from '../api/tabResponses';
 
 export default function MikopoPapoScreen() {
@@ -95,16 +95,6 @@ export default function MikopoPapoScreen() {
     }
   };
 
-  const handleApproveTopUp = async (id: string) => {
-    try {
-      const res = await apiClient.post(`/papo/approve-topup/${id}`);
-      Alert.alert('Imeidhinishwa', res.data?.message);
-      void papo.reload();
-    } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kuidhinisha.');
-    }
-  };
-
   const handleRequestRepayTopUp = async (id: string) => {
     try {
       const res = await apiClient.post(`/papo/request-repay-topup/${id}`);
@@ -167,16 +157,6 @@ export default function MikopoPapoScreen() {
     }
   };
 
-  const handleApproveLoan = async (loanId: string) => {
-    try {
-      const res = await apiClient.post(`/loans/approve/${loanId}`);
-      Alert.alert('Imeidhinishwa', res.data?.message);
-      void loans.reload();
-    } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kuidhinisha mkopo.');
-    }
-  };
-
   const handleRequestRepayLoan = async (loanId: string) => {
     try {
       const res = await apiClient.post(`/loans/request-repay/${loanId}`);
@@ -204,11 +184,10 @@ export default function MikopoPapoScreen() {
 
   const rawLoans = Array.isArray(loansData?.loans) ? loansData.loans : [];
   const allLoans = isLeader ? rawLoans : rawLoans.filter((l: any) => l.userId === user?.id);
-  const activeLoansList = allLoans;
+  const activeLoansList = allLoans.filter((loan: any) => loan.status !== 'PENDING');
   const guarantorRequests = Array.isArray(loansData?.guarantorRequests) ? loansData.guarantorRequests : [];
   const potentialGuarantors = Array.isArray(loansData?.potentialGuarantors) ? loansData.potentialGuarantors : [];
   const topUps = Array.isArray(papoData?.topUps) ? papoData.topUps : [];
-  const pendingTopUps = Array.isArray(papoData?.pendingTopUpRequests) ? papoData.pendingTopUpRequests : [];
   const repayingTopUps = Array.isArray(papoData?.repayingTopUpRequests) ? papoData.repayingTopUpRequests : [];
 
   const monthlyLoanInterest = Math.round(numericLoan * interestRatePct) / 100;
@@ -254,6 +233,9 @@ export default function MikopoPapoScreen() {
           {panel.data != null && <>
           {activeTab === 'PAPO' ? (
             <>
+              {papo.data && (papo.data.hasPapo || !!papo.data.fundingQueue?.length) && (
+                <FundingQueuePanel key={scope + 'papo-funding'} rows={papo.data.fundingQueue ?? []} leader={isLeader} kind="PAPO" reload={papo.reload} />
+              )}
               {!papoData?.hasPapo ? (
                 <View className={`p-6 rounded-2xl items-center border ${cardClass}`}>
                   <Ionicons name="information-circle-outline" size={36} color="#64748b" />
@@ -316,29 +298,6 @@ export default function MikopoPapoScreen() {
                       </TouchableOpacity>
                     )}
                   </View>
-                  {isLeader && pendingTopUps.length > 0 && (
-                    <View className="bg-amber-50 border border-amber-300 p-4 rounded-2xl mb-4">
-                      <Text className="font-extrabold text-amber-950 text-xs uppercase mb-2">
-                        Maombi Mapya ya Papo Hiari ({pendingTopUps.length})
-                      </Text>
-                      {pendingTopUps.map((pt: any) => (
-                        <View key={pt.id} className="bg-white p-3 rounded-xl border border-amber-200 mb-2">
-                          <Text className="font-bold text-slate-900 text-xs">{pt.user?.fullName}</Text>
-                          <Text className="text-xs text-slate-600 mt-0.5">
-                            Anaomba: <Text className="font-bold">TZS {Number(pt.principalAmount || 0).toLocaleString()}</Text> (Majuma {papoData?.topUpPapoWeeks})
-                          </Text>
-                          <TouchableOpacity
-                            onPress={() => handleApproveTopUp(pt.id)}
-                            className="bg-emerald-600 py-2 rounded-lg items-center mt-2"
-                          >
-                            <Text className="text-white font-bold text-xs">Idhinisha & Anza Hesabu ya Majuma</Text>
-                          </TouchableOpacity>
-                          <DeclineRequest path={'/papo/decline/' + pt.id + '/application'} reload={papo.reload} />
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
                   {isLeader && repayingTopUps.length > 0 && (
                     <View className="bg-teal-50 border border-teal-300 p-4 rounded-2xl mb-4">
                       <Text className="font-extrabold text-teal-950 text-xs uppercase mb-2">
@@ -362,12 +321,12 @@ export default function MikopoPapoScreen() {
                     </View>
                   )}
 
-                  {topUps.length > 0 && (
+                  {topUps.some((t: any) => t.status !== 'PENDING') && (
                     <>
                       <Text className={`font-bold text-xs uppercase mb-2 ${textSub}`}>
                         Papo Zako za Hiari
                       </Text>
-                      {topUps.map((t: any) => (
+                      {topUps.filter((t: any) => t.status !== 'PENDING').map((t: any) => (
                           <View key={t.id} className={`p-4 rounded-2xl mb-3 border ${cardClass}`}>
                             <View className="flex-row justify-between items-center">
                               <Text className={`font-extrabold text-sm ${textMain}`}>
@@ -406,6 +365,7 @@ export default function MikopoPapoScreen() {
             </>
           ) : (
             <>
+              <FundingQueuePanel key={scope + 'loan-funding'} rows={loans.data?.fundingQueue ?? []} leader={isLeader} kind="LOANS" reload={loans.reload} />
               <LoanQueuePanel key={scope} data={queue.data} userId={user?.id} chair={role === 'CHAIRPERSON'} reload={queue.reload} error={queue.error} />
               <View className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg mb-4">
                 <View className="flex-row justify-between items-center mb-1">
@@ -444,6 +404,15 @@ export default function MikopoPapoScreen() {
                 </TouchableOpacity>
               </View>
 
+              {loans.data?.guarantorRepaidNotices?.map(item => (
+                <View key={item.id} className="mb-3 rounded-xl bg-teal-50 p-3">
+                  <Text className="text-teal-900">{item.name} amekamilisha mkopo ulioudhamini.</Text>
+                  <TouchableOpacity className="mt-2 self-start rounded-lg bg-teal-700 px-3 py-2" onPress={async () => {
+                    try { await apiClient.post('/loans/dismiss-guarantor-notice/' + item.id); await loans.reload(); }
+                    catch { Alert.alert('Hitilafu', 'Imeshindikana kusasisha taarifa za udhamini.'); }
+                  }}><Text className="font-bold text-white">Nimesoma</Text></TouchableOpacity>
+                </View>
+              ))}
               {guarantorRequests.length > 0 && (
                 <View className="bg-amber-50 border border-amber-300 p-4 rounded-2xl mb-4">
                   <Text className="font-bold text-amber-900 mb-2">
@@ -528,7 +497,6 @@ export default function MikopoPapoScreen() {
                       </View>
 
                       {l.feedback ? <Text className={textMain}>Mrejesho: {l.feedback}</Text> : null}
-                      {isLeader && l.status === 'PENDING' && <DeclineRequest path={'/loans/reject/' + l.id} reload={loans.reload} />}
                       {l.repaymentQuote && <LoanPaymentPanel id={l.id} quote={l.repaymentQuote} latest={l.repaymentPlan?.latest ?? null}
                         history={l.repaymentPlan?.history ?? []} mine={l.userId === user?.id} chair={role === 'CHAIRPERSON'} status={l.status} reload={loans.reload} />}
                       <View className="flex-row justify-between mt-3 pt-2 border-t border-slate-200/20">
@@ -561,15 +529,6 @@ export default function MikopoPapoScreen() {
                             </Text>
                           </Text>
                         </View>
-                      )}
-
-                      {isLeader && l.status === 'PENDING' && (!l.guarantorId || l.guarantorStatus === 'ACCEPTED') && (
-                        <TouchableOpacity
-                          onPress={() => handleApproveLoan(l.id)}
-                          className="bg-teal-700 py-2.5 rounded-xl items-center mt-3"
-                        >
-                          <Text className="text-white font-bold text-xs">Idhinisha & Toa Mkopo</Text>
-                        </TouchableOpacity>
                       )}
 
                       {!l.repaymentPlan && isLeader && hasNextInterest && !isFinalMonth && (l.status === 'DISBURSED' || l.status === 'OVERDUE') && (

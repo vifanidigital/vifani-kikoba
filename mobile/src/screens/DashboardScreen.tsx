@@ -31,14 +31,12 @@ export default function DashboardScreen() {
   const { user, group: activeGroup, role: activeRole } = useAuth();
   const { isDark } = useTheme();
 
-  const isLeader = activeRole === 'CHAIRPERSON' || activeRole === 'SECRETARY' || activeRole === 'TREASURER';
 
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(false);
   const requestVersion = useRef(0);
   const [refreshing, setRefreshing] = useState(false);
   const [summary, setSummary] = useState<any>(null);
-  const [feed, setFeed] = useState<any>(null);
   const [groupSettings, setGroupSettings] = useState<any>(null);
 
   const [hideBalances, setHideBalances] = useUserPreference(user?.id, 'hide_balances', false);
@@ -100,27 +98,23 @@ export default function DashboardScreen() {
     if (version !== requestVersion.current) return;
     if (cached) {
       if (cached.summary) setSummary(cached.summary);
-      if (cached.feed) setFeed(cached.feed);
       if (cached.groupSettings) setGroupSettings(cached.groupSettings);
       if (cached.announcement !== undefined) setAnnouncement(cached.announcement);
     }
 
     try {
-      const [sumRes, feedRes, setRes] = await Promise.all([
+      const [sumRes, setRes] = await Promise.all([
         apiClient.get('/shares/summary'),
-        apiClient.get('/loans/dashboard-feed'),
         apiClient.get('/group/settings'),
       ]);
       if (version !== requestVersion.current) return;
 
       const freshSummary = sumRes.data || {};
-      const freshFeed = feedRes.data || {};
       const freshGroup = setRes.data?.group || null;
       const latestAnn = String(freshGroup?.announcement || '').trim();
       const revision = freshGroup?.announcementUpdatedAt ?? latestAnn;
 
       setSummary(freshSummary);
-      setFeed(freshFeed);
       setGroupSettings(freshGroup);
       setAnnouncement(latestAnn);
 
@@ -135,7 +129,6 @@ export default function DashboardScreen() {
 
       await setCachedData(cacheKey, {
         summary: freshSummary,
-        feed: freshFeed,
         groupSettings: freshGroup,
         announcement: latestAnn,
       });
@@ -171,34 +164,6 @@ export default function DashboardScreen() {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setAnnouncementDismissed(true);
   };
-  const handleGuarantorRespond = async (loanId: string, decision: 'ACCEPT' | 'REJECT') => {
-    try {
-      const res = await apiClient.post(`/loans/guarantor-respond/${loanId}`, { decision });
-      Alert.alert('Taarifa', res.data?.message);
-      loadDashboard();
-    } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kujibu udhamini.');
-    }
-  };
-
-  const handleLeaderApprove = async (loanId: string) => {
-    try {
-      const res = await apiClient.post(`/loans/approve/${loanId}`);
-      Alert.alert('Imeidhinishwa', res.data?.message);
-      loadDashboard();
-    } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kuidhinisha mkopo.');
-    }
-  };
-
-  const handleAcknowledgeAnnouncement = async (loanId: string) => {
-    try {
-      await apiClient.post(`/loans/acknowledge/${loanId}`);
-      loadDashboard();
-    } catch {
-      Alert.alert('Hitilafu', 'Imeshindikana kurekodi itikio lako.');
-    }
-  };
 
   const getRoleTitle = (r?: string) => {
     if (r === 'CHAIRPERSON') return 'Mwenyekiti';
@@ -212,10 +177,6 @@ export default function DashboardScreen() {
   const textMain = isDark ? 'text-white' : 'text-slate-900';
   const textSub = isDark ? 'text-slate-400' : 'text-slate-500';
 
-  const guarantorRequests = Array.isArray(feed?.guarantorRequests) ? feed.guarantorRequests : [];
-  const leaderPendingLoans = Array.isArray(feed?.leaderPendingLoans) ? feed.leaderPendingLoans.filter((loan: any) => !loan.guarantorId || loan.guarantorStatus === 'ACCEPTED') : [];
-  const unreadAnnouncements = Array.isArray(feed?.unreadAnnouncements) ? feed.unreadAnnouncements : [];
-  const myActiveLoans = Array.isArray(feed?.myActiveLoans) ? feed.myActiveLoans : [];
 
   const b = summary?.breakdown || {};
   const breakdownGrandTotal =
@@ -583,168 +544,6 @@ export default function DashboardScreen() {
             </View>
             <Ionicons name="chevron-forward" size={20} color="#ffffff" />
           </TouchableOpacity>
-          {Array.isArray(feed?.guarantorRepaidNotices) && feed.guarantorRepaidNotices.length > 0 && (
-            <View className="bg-emerald-50 border border-emerald-300 p-4 rounded-2xl mb-4">
-              <View className="flex-row items-center gap-2 mb-2">
-                <Ionicons name="checkmark-circle" size={20} color="#059669" />
-                <Text className="font-extrabold text-emerald-950 text-sm">
-                  Taarifa ya Marejesho ya Udhamini
-                </Text>
-              </View>
-              {feed.guarantorRepaidNotices.map((notice: any) => (
-                <View key={notice.id} className="bg-white p-3.5 rounded-xl border border-emerald-200 mb-2">
-                  <Text className="text-xs text-slate-800">
-                    Mwanachama <Text className="font-bold">{notice.user?.fullName}</Text> uliyemdhamini mkopo wa{' '}
-                    <Text className="font-bold">TZS {Number(notice.principalAmount || 0).toLocaleString()}</Text> amekamilisha kurejesha mkopo wote!
-                  </Text>
-                  <TouchableOpacity
-                    onPress={async () => {
-                      await apiClient.post(`/loans/dismiss-guarantor-notice/${notice.id}`);
-                      loadDashboard();
-                    }}
-                    className="bg-emerald-600 self-end px-4 py-1.5 rounded-xl mt-2"
-                  >
-                    <Text className="text-white font-bold text-xs">Nimesoma</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {guarantorRequests.length > 0 && (
-            <View className="bg-amber-50 border border-amber-300 p-4 rounded-2xl mb-4">
-              <View className="flex-row items-center gap-2 mb-2">
-                <Ionicons name="hand-left" size={20} color="#b45309" />
-                <Text className="font-extrabold text-amber-950 text-sm">
-                  Ombi la Udhamini Linakusubiri ({guarantorRequests.length})
-                </Text>
-              </View>
-              {guarantorRequests.map((req: any) => (
-                <View key={req.id} className="bg-white p-3.5 rounded-xl border border-amber-200 mb-2">
-                  <Text className="font-bold text-slate-900">{req.user?.fullName}</Text>
-                  <Text className="text-xs text-slate-600 mt-0.5">
-                    Anaomba mkopo wa <Text className="font-bold">TZS {Number(req.principalAmount || 0).toLocaleString()}</Text> na amekuchagua kuwa mdhamini wake.
-                  </Text>
-                  <View className="flex-row gap-2 mt-3">
-                    <TouchableOpacity
-                      onPress={() => handleGuarantorRespond(req.id, 'ACCEPT')}
-                      className="flex-1 bg-emerald-600 py-2.5 rounded-xl items-center"
-                    >
-                      <Text className="text-white font-bold text-xs">Idhinisha Udhamini</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleGuarantorRespond(req.id, 'REJECT')}
-                      className="flex-1 bg-rose-600 py-2.5 rounded-xl items-center"
-                    >
-                      <Text className="text-white font-bold text-xs">Kataa</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {isLeader && leaderPendingLoans.length > 0 && (
-            <View className="bg-teal-50 border border-teal-300 p-4 rounded-2xl mb-4">
-              <View className="flex-row items-center gap-2 mb-2">
-                <Ionicons name="checkmark-done-circle" size={20} color="#0f766e" />
-                <Text className="font-extrabold text-teal-950 text-sm">
-                  Mikopo Inayosubiri Idhini ya Uongozi ({leaderPendingLoans.length})
-                </Text>
-              </View>
-              {leaderPendingLoans.map((l: any) => (
-                <View key={l.id} className="bg-white p-3.5 rounded-xl border border-teal-200 mb-2">
-                  <Text className="font-bold text-slate-900">{l.user?.fullName}</Text>
-                  <Text className="text-xs text-slate-600 mt-0.5">
-                    Kiasi: <Text className="font-bold">TZS {Number(l.principalAmount || 0).toLocaleString()}</Text> • Mdhamini: {l.guarantor?.fullName || 'N/A'} (Amekubali)
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => handleLeaderApprove(l.id)}
-                    className="bg-teal-700 py-2.5 rounded-xl items-center mt-3"
-                  >
-                    <Text className="text-white font-bold text-xs">Idhinisha & Toa Mkopo</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {unreadAnnouncements.length > 0 && (
-            <View className="mb-4">
-              <Text className={`text-xs font-bold uppercase mb-2 ${textSub}`}>
-                Taarifa za Mikopo Iliyotolewa Kikaoni
-              </Text>
-              {unreadAnnouncements.map((item: any) => (
-                <View key={item.id} className="bg-indigo-50 border border-indigo-200 p-4 rounded-2xl mb-2.5">
-                  <View className="flex-row justify-between items-start">
-                    <View className="flex-1 pr-2">
-                      <Text className="font-extrabold text-indigo-950 text-sm">
-                        Mkopo Umetolewa: {item.user?.fullName}
-                      </Text>
-                      <Text className="text-xs text-indigo-900 mt-1">
-                        Kiasi: <Text className="font-bold">TZS {Number(item.principalAmount || 0).toLocaleString()}</Text> • Mdhamini: <Text className="font-bold">{item.guarantor?.fullName || 'Hakuna'}</Text>
-                      </Text>
-                      {item.disbursedAt && (
-                        <Text className="text-[11px] text-indigo-700 mt-0.5">
-                          Tarehe aliyopokea: {new Date(item.disbursedAt).toLocaleDateString('sw-TZ')}
-                        </Text>
-                      )}
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => handleAcknowledgeAnnouncement(item.id)}
-                      className="bg-indigo-700 px-3.5 py-2 rounded-xl"
-                    >
-                      <Text className="text-white font-bold text-xs">Nimeona</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {(Number(feed?.loanPaymentsPending || 0) + Number(feed?.papoRequestsPending || 0) + Number(feed?.swapRequestsPending || 0) > 0 || feed?.requestFeedback?.length > 0) && (
-            <View className={`mb-4 rounded-2xl border p-4 ${cardClass}`}>
-              <Text className={`mb-2 font-bold ${textMain}`}>Maombi na mrejesho</Text>
-              {feed?.loanPaymentsPending > 0 && <Text className={textMain}>Marejesho ya mkopo yanayosubiri uhakiki: {feed.loanPaymentsPending}</Text>}
-              {feed?.papoRequestsPending > 0 && <Text className={textMain}>Maombi ya Papo yanayosubiri uamuzi: {feed.papoRequestsPending}</Text>}
-              {feed?.swapRequestsPending > 0 && <Text className={textMain}>Maombi ya kubadilishana namba: {feed.swapRequestsPending}</Text>}
-              {Array.isArray(feed?.requestFeedback) && feed.requestFeedback.map((item: { id: string; message: string }) =>
-                <Text key={item.id} className={`mt-1 ${textSub}`}>{item.message}</Text>,
-              )}
-            </View>
-          )}
-
-          {myActiveLoans.length > 0 && (
-            <View className="mb-4">
-              <Text className={`text-xs font-bold uppercase mb-2 ${textSub}`}>
-                Kumbukumbu ya Deni Langu Hai
-              </Text>
-              {myActiveLoans.map((ml: any) => {
-                const remaining = ml.repaymentQuote?.dueBalance ?? Math.max(0, Number(ml.totalRepayable || 0) - Number(ml.amountPaid || 0));
-                return (
-                  <View key={ml.id} className={`p-4 rounded-2xl border mb-2.5 ${cardClass}`}>
-                    <View className="flex-row justify-between items-center">
-                      <Text className={`font-extrabold text-sm ${textMain}`}>
-                        Mkopo: TZS {Number(ml.principalAmount || 0).toLocaleString()}
-                      </Text>
-                      <View className="bg-amber-100 px-2.5 py-1 rounded-lg">
-                        <Text className="text-amber-800 font-bold text-[11px]">Baki: TZS {remaining.toLocaleString()}</Text>
-                      </View>
-                    </View>
-                    <Text className={`text-xs mt-1.5 ${textSub}`}>
-                      Mdhamini Wako: <Text className="font-bold">{ml.guarantor?.fullName || 'Hakuna'}</Text>
-                    </Text>
-                    {ml.disbursedAt && (
-                      <Text className={`text-xs mt-0.5 ${textSub}`}>
-                        Tarehe Uliyopokea: {new Date(ml.disbursedAt).toLocaleDateString('sw-TZ')}
-                      </Text>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-          )}
-
           <View className="h-10" />
         </Animated.View>
       </ScrollView>

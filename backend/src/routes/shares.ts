@@ -52,8 +52,8 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
       prisma.transaction.findMany({ where: { groupId, createdAt: { gte: startOfToday } } }),
       prisma.fineRecord.aggregate({ where: { groupId, isPaid: true, paidAt: { gte: startOfToday } }, _sum: { amount: true } }),
       prisma.fineRecord.aggregate({ where: { groupId, isPaid: false, createdAt: { gte: startOfToday } }, _sum: { amount: true } }),
-      prisma.loan.aggregate({ where: { groupId, disbursedAt: { gte: startOfToday } }, _sum: { principalAmount: true } }),
-      prisma.papoTopUp.aggregate({ where: { groupId, status: 'ACTIVE', createdAt: { gte: startOfToday } }, _sum: { principalAmount: true } }),
+      prisma.loan.aggregate({ where: { groupId, fundedAmount: null, disbursedAt: { gte: startOfToday } }, _sum: { principalAmount: true } }),
+      prisma.papoTopUp.aggregate({ where: { groupId, fundedAmount: null, status: 'ACTIVE', createdAt: { gte: startOfToday } }, _sum: { principalAmount: true } }),
       prisma.groupExpense.aggregate({ where: { groupId, createdAt: { gte: startOfToday } }, _sum: { amount: true } }),
       prisma.transaction.aggregate({ where: { groupId, userId, type: 'PAPO_INTEREST' }, _sum: { amount: true } }),
       prisma.fineRecord.aggregate({ where: { groupId, userId, isPaid: false }, _sum: { amount: true } }),
@@ -71,6 +71,7 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
     let loansPrincipalOut = 0;
 
     for (const l of allLoans) {
+      if (l.status === 'PENDING') { loansPrincipalOut += l.fundedAmount ?? 0; continue; }
       const modern = currentLoanQuote(l);
       if (modern) {
         const plan = l.repaymentPlan as RepaymentPlan;
@@ -80,7 +81,7 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
       }
       const interestPortion = Math.max(0, (l.totalRepayable || 0) - (l.principalAmount || 0));
       totalLoanInterestCollected += Math.min(interestPortion, l.amountPaid || 0);
-      if (l.status === 'DISBURSED' || l.status === 'OVERDUE') {
+      if (['DISBURSED', 'OVERDUE', 'REPAYMENT_PENDING'].includes(l.status)) {
         loansPrincipalOut += Math.max(0, (l.principalAmount || 0) - Math.max(0, (l.amountPaid || 0) - interestPortion));
       }
     }
@@ -90,19 +91,20 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
     let papoInterestCollected = periodicPapo._sum.amount ?? 0;
     let papoTopUpOut = 0;
     for (const t of allTopUps) {
+      if (t.status === 'PENDING') { papoTopUpOut += t.fundedAmount ?? 0; continue; }
       const interestPart = Math.max(0, (t.totalPayable || 0) - (t.principalAmount || 0));
       papoInterestCollected += Math.min(interestPart, t.amountPaid || 0);
-      if (t.status === 'ACTIVE' || t.status === 'OVERDUE') {
+      if (['ACTIVE', 'OVERDUE', 'REPAYMENT_PENDING'].includes(t.status)) {
         papoTopUpOut += Math.max(0, (t.principalAmount || 0) - Math.max(0, (t.amountPaid || 0) - interestPart));
       }
     }
 
-    const myLoansDebt = allLoans
-      .filter((l) => l.userId === userId && (l.status === 'DISBURSED' || l.status === 'OVERDUE'))
+    const myLoansDebt = allLoans.filter(l => l.userId === userId && l.status === 'PENDING').reduce((sum, l) => sum + (l.fundedAmount ?? 0), 0) + allLoans
+      .filter((l) => l.userId === userId && (['DISBURSED', 'OVERDUE', 'REPAYMENT_PENDING'].includes(l.status)))
       .reduce((s, l) => s + (currentLoanQuote(l)?.dueBalance ?? Math.max(0, (l.totalRepayable || 0) - (l.amountPaid || 0))), 0);
 
-    const myPapoTopUpDebt = allTopUps
-      .filter((t) => t.userId === userId && (t.status === 'ACTIVE' || t.status === 'OVERDUE'))
+    const myPapoTopUpDebt = allTopUps.filter(t => t.userId === userId && t.status === 'PENDING').reduce((sum, t) => sum + (t.fundedAmount ?? 0), 0) + allTopUps
+      .filter((t) => t.userId === userId && (['ACTIVE', 'OVERDUE', 'REPAYMENT_PENDING'].includes(t.status)))
       .reduce((s, t) => s + Math.max(0, (t.totalPayable || 0) - (t.amountPaid || 0)), 0);
 
     const tShares = todayShares._sum.amountPaid || 0;
@@ -114,8 +116,8 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
     const tPaidFines = todayPaidFines._sum.amount || 0;
     const tUnpaidFines = todayUnpaidFines._sum.amount || 0;
 
-    const tLoansLentToday = todayLoansDisbursed._sum.principalAmount || 0;
-    const tPapoLentToday = todayTopUpsDisbursed._sum.principalAmount || 0;
+    const tLoansLentToday = (todayLoansDisbursed._sum.principalAmount ?? 0) + todayTransactions.filter(row => row.type === 'LOAN_DISBURSEMENT').reduce((sum, row) => sum + row.amount, 0);
+    const tPapoLentToday = (todayTopUpsDisbursed._sum.principalAmount ?? 0) + todayTransactions.filter(row => row.type === 'PAPO_TOPUP_DISBURSEMENT').reduce((sum, row) => sum + row.amount, 0);
     const tExpensesToday = todayExpensesAgg._sum.amount || 0;
 
     const tTotalIn = tShares + tSocial + tPapoInterest + tTopUpRepaid + tLoanInterestRepaid + tLoanPrincipalRepaid + tPaidFines;

@@ -154,3 +154,44 @@ export function DeclineRequest({ path, reload }: { path: string; reload: () => P
     {error ? <Text accessibilityRole="alert" className="text-rose-600">{error}</Text> : null}
   </View>;
 }
+
+type FundingRow = { id: string; fullName: string; requested: number; funded: number; remaining: number; needsGuarantor?: boolean };
+
+export function FundingQueuePanel({ rows, leader, kind, reload }: {
+  rows: FundingRow[]; leader: boolean; kind: 'PAPO' | 'LOANS'; reload: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [amount, setAmount] = useState('');
+  const { busy, error, run } = useLoanAction(reload);
+  const head = rows[0];
+  const current = decimal(amount.trim());
+  return <View className="mb-4 rounded-2xl bg-slate-900 p-4">
+    <Text className="text-base font-bold text-white">{kind === 'PAPO' ? 'Foleni ya maombi ya Papo' : 'Foleni ya maombi ya mikopo mikubwa'}</Text>
+    {!rows.length && <Text className="mt-2 text-slate-200">Hakuna ombi linalosubiri kutolewa fedha.</Text>}
+    {rows.map((row, index) => <View key={row.id} className="mt-2 border-t border-slate-700 pt-2">
+      <Text className="font-bold text-white">{index + 1}. {row.fullName}{index === 0 ? ' - anahudumiwa kwanza' : ''}</Text>
+      <Text className="text-slate-200">Ameomba {money(row.requested)} · Amepewa {money(row.funded)}</Text>
+      <Text className="font-bold text-teal-300">Baki la kutolewa {money(row.remaining)}</Text>
+      {row.needsGuarantor && <Text className="text-amber-200">Inasubiri uthibitisho wa mdhamini.</Text>}
+    </View>)}
+    {leader && head && !head.needsGuarantor && (editing === head.id ? <View className="mt-3">
+      <FormTextInput accessibilityLabel="Kiasi kilichotolewa" keyboardType="decimal-pad" className={inputStyle}
+        value={amount} onChangeText={setAmount} placeholder="Kiasi ulichotoa (TZS)" editable={!busy} />
+      <Action label="Tumia baki lote" disabled={busy} onPress={() => setAmount(String(head.remaining))} />
+      <Action label="Hifadhi kiasi kilichotolewa" disabled={busy || !(current > 0 && current <= head.remaining)} onPress={() => {
+        const path = kind === 'LOANS' ? '/loans/approve/' : '/papo/approve-topup/';
+        Alert.alert('Thibitisha utoaji', 'Umempatia ' + head.fullName + ' ' + money(current) + '?', [
+          { text: 'Ghairi', style: 'cancel' },
+          { text: 'Thibitisha', onPress: () => void run(() => apiClient.post(path + head.id, { amount: current, expectedFunded: head.funded }), () => {
+            setEditing(null); setAmount('');
+          }) },
+        ]);
+      }} />
+      <Action label="Ghairi" disabled={busy} onPress={() => setEditing(null)} />
+    </View> : <Action label="Rekodi kiasi ulichotoa" disabled={busy} onPress={() => { setEditing(head.id); setAmount(''); }} />)}
+    {leader && head && head.funded === 0 && <DeclineRequest key={head.id} path={
+      kind === 'LOANS' ? '/loans/reject/' + head.id : '/papo/decline/' + head.id + '/application'
+    } reload={reload} />}
+    {error ? <Text accessibilityRole="alert" className="text-rose-200">{error}</Text> : null}
+  </View>;
+}

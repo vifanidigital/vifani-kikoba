@@ -172,6 +172,7 @@ model PapoAccount {
 }
 
 model PapoTopUp {
+  fundedAmount Float?
   feedback String?
   id              String    @id @default(uuid())
   groupId         String
@@ -188,6 +189,7 @@ model PapoTopUp {
 }
 
 model Loan {
+  fundedAmount Float?
   feedback String?
   id              String         @id @default(uuid())
   groupId         String

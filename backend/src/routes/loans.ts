@@ -1,5 +1,6 @@
+import { fundingInput, fundingOrder, fundingEntry, recordFunding } from '../lib/loanFunding';
 import { calendarLoanDue, currentLoanQuote, blankRepaymentPlan, RepaymentPlan } from '../lib/loanRepayment';
-import loanQueue, { takeLoanTurn, LoanConflict, LoanQueue } from './loanQueue';
+import loanQueue, { takeLoanTurn, LoanConflict, LoanQueue, lockLoanGroup } from './loanQueue';
 import loanPayments from './loanPayments';
 import { interestTiming, unpaidInterestInstallments } from '../lib/loanInterest';
 import { Router, Response } from 'express';
@@ -71,6 +72,11 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
     res.json({
       loans: loans.filter(loan => LEADER_ROLES.includes(role) || loan.userId === userId)
         .map(loan => ({ ...loan, repaymentQuote: currentLoanQuote(loan), nextInterestInstallment: loan.repaymentPlan ? null : unpaidInterestInstallments(loan)[0] ?? null })),
+      fundingQueue: loans.filter(loan => loan.status === 'PENDING')
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : 1))
+        .map(loan => ({ ...fundingEntry(loan), needsGuarantor: Boolean(loan.guarantorId && loan.guarantorStatus !== 'ACCEPTED') })),
+      guarantorRepaidNotices: loans.filter(loan => loan.guarantorId === userId && loan.guarantorStatus === 'REPAID_NOTIFY')
+        .map(loan => ({ id: loan.id, name: loan.user.fullName })),
       interestPayments,
       effectiveMaxLoan,
       myInterestProfit: interestPayments
@@ -244,7 +250,7 @@ router.post('/guarantor-respond/:id', authenticateToken, async (req: AuthRequest
     }
 
     const changed = await prisma.loan.updateMany({
-      where: { id, groupId, guarantorId: userId, status: 'PENDING', guarantorStatus: 'PENDING' },
+      where: { id, groupId, guarantorId: userId, status: 'PENDING', guarantorStatus: 'PENDING', OR: [{ fundedAmount: null }, { fundedAmount: 0 }] },
       data: {
         guarantorStatus: decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED',
         status: decision === 'ACCEPT' ? 'PENDING' : 'REJECTED',
@@ -265,7 +271,7 @@ router.post('/reject/:id', authenticateToken, async (req: AuthRequest, res) => {
   const reason = z.string().trim().min(3).max(300).safeParse(req.body?.reason);
   if (!reason.success) return res.status(400).json({ error: 'Andika sababu ya kukataa ombi.' });
   const result = await prisma.loan.updateMany({
-    where: { id: String(req.params.id), groupId, status: 'PENDING' },
+    where: { id: String(req.params.id), groupId, status: 'PENDING', OR: [{ fundedAmount: null }, { fundedAmount: 0 }] },
     data: { status: 'REJECTED', feedback: reason.data },
   });
   if (!result.count) throw new LoanConflict('Ombi hili halisubiri uamuzi.');
@@ -273,31 +279,36 @@ router.post('/reject/:id', authenticateToken, async (req: AuthRequest, res) => {
 });
 
 router.post('/approve/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    const { groupId, role } = req.user!;
-    if (!LEADER_ROLES.includes(role)) {
-      return res.status(403).json({ error: 'Viongozi pekee ndio wanaweza kuidhinisha.' });
-    }
-
-    const id = String(req.params.id);
-    const loan = await prisma.loan.findUnique({ where: { id } });
-    if (!loan || loan.groupId !== groupId) {
-      return res.status(404).json({ error: 'Mkopo haujapatikana.' });
-    }
-
-    const disbursedAt = new Date();
-    const dueDate = loan.repaymentPlan ? calendarLoanDue(disbursedAt, 2) : new Date(disbursedAt.getTime() + (loan.repaymentMonths || 1) * 30 * 24 * 60 * 60 * 1000);
-    const nextInterestDue = loan.repaymentPlan ? calendarLoanDue(disbursedAt, 1) : unpaidInterestInstallments({ ...loan, disbursedAt })[0]?.dueAt ?? null;
-    const approved = await prisma.loan.updateMany({
-      where: { id, groupId, status: 'PENDING', OR: [{ guarantorId: null }, { guarantorStatus: 'ACCEPTED' }], group: { members: { some: { userId: loan.userId, isActive: true } } } },
-      data: { status: 'DISBURSED', disbursedAt, dueDate, nextInterestDue },
+  const { groupId, role } = req.user!;
+  if (!LEADER_ROLES.includes(role)) return res.status(403).json({ error: 'Viongozi pekee wanaweza kurekodi utoaji wa mkopo.' });
+  const input = fundingInput.safeParse(req.body);
+  if (!input.success) return res.status(400).json({ error: 'Weka kiasi halisi cha fedha ulichotoa kwenye foleni ya mikopo.' });
+  const id = String(req.params.id);
+  const funding = await prisma.$transaction(async tx => {
+    await lockLoanGroup(tx, groupId);
+    const loan = await tx.loan.findFirst({ where: { groupId, status: 'PENDING' }, orderBy: fundingOrder });
+    if (!loan || loan.id !== id) throw new LoanConflict('Mwanachama wa kwanza kwenye foleni ndiye anayehudumiwa.');
+    if (loan.guarantorId && loan.guarantorStatus !== 'ACCEPTED') throw new LoanConflict('Subiri uthibitisho wa mdhamini.');
+    const member = await tx.groupMember.findUnique({ where: { groupId_userId: { groupId, userId: loan.userId } } });
+    if (!member?.isActive) throw new LoanConflict('Mwanachama huyu si hai.');
+    const result = recordFunding(loan.principalAmount, loan.fundedAmount ?? 0, input.data.amount, input.data.expectedFunded);
+    if (!result) throw new LoanConflict('Kiasi kinazidi fedha zilizobaki kutolewa au taarifa zimebadilika. Sasisha foleni.');
+    const now = new Date();
+    const dates = result.remaining === 0 ? {
+      status: 'DISBURSED', disbursedAt: now,
+      dueDate: loan.repaymentPlan ? calendarLoanDue(now, 2) : new Date(now.getTime() + loan.repaymentMonths * 30 * 86400000),
+      nextInterestDue: loan.repaymentPlan ? calendarLoanDue(now, 1) : unpaidInterestInstallments({ ...loan, disbursedAt: now })[0]?.dueAt ?? null,
+    } : {};
+    const changed = await tx.loan.updateMany({
+      where: { id, status: 'PENDING', fundedAmount: loan.fundedAmount },
+      data: { fundedAmount: result.fundedAmount, ...dates },
     });
-    if (!approved.count) return res.status(409).json({ error: 'Mkopo hausubiri idhini, udhamini haujakubaliwa au mwanachama si hai.' });
-
-    res.json({ message: 'Mkopo umeidhinishwa na kutolewa!' });
-  } catch {
-    res.status(500).json({ error: 'Imeshindikana kuidhinisha mkopo.' });
-  }
+    if (!changed.count) throw new LoanConflict('Ombi limebadilika. Sasisha foleni.');
+    await tx.transaction.create({ data: { groupId, userId: loan.userId, type: 'LOAN_DISBURSEMENT',
+      amount: Math.round((result.fundedAmount - (loan.fundedAmount ?? 0)) * 100) / 100, interestLoanId: id } });
+    return result;
+  });
+  res.json({ ...funding, message: funding.remaining ? 'Fedha za sehemu zimerekodiwa.' : 'Mkopo umetolewa kikamilifu.' });
 });
 router.post('/pay-monthly-interest/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {

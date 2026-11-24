@@ -13,15 +13,22 @@ const member = z.looseObject({
   suspensionReason: z.string().nullish(),
 });
 
+const fundingEntry = z.object({
+  id: z.string(), userId: z.string(), fullName: z.string(), requested: z.number(), funded: z.number(),
+  remaining: z.number(), needsGuarantor: z.boolean().optional(),
+});
+
 export const parsePapo = z.looseObject({
   hasPapo: z.boolean(),
   topUps: z.array(record),
-  pendingTopUpRequests: z.array(record).optional(),
+  fundingQueue: z.array(fundingEntry).optional(),
   repayingTopUpRequests: z.array(record).optional(),
 }).parse;
 
 export const parseLoans = z.looseObject({
   loans: z.array(record),
+  fundingQueue: z.array(fundingEntry).optional(),
+  guarantorRepaidNotices: z.array(z.object({ id: z.string(), name: z.string() })).optional(),
   interestPayments: z.array(z.object({
     id: z.string(), userId: z.string(), fullName: z.string(),
     amount: z.number(), paidAt: z.string(), dueAt: z.string().nullable(),
