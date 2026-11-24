@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { addMonths, MONTHLY_PRICE, subscriptionAccess } from '../lib/subscription';
+import { localDate, parseMeetingDate } from '../lib/meetingCalendar';
 import { adminPage } from './adminPage';
 
 const router = Router();
@@ -125,6 +126,38 @@ router.post('/groups/:id/payments', async (req, res) => {
     }
     res.status(500).json({ error: 'Imeshindikana kurekodi malipo.' });
   }
+});
+
+router.put('/groups/:id/service-period', async (req, res) => {
+  const input = z.union([
+    z.object({ months: z.number().int().min(1).max(24) }).strict(),
+    z.object({ endsOn: z.string() }).strict(),
+  ]).safeParse(req.body);
+  if (!input.success) return res.status(400).json({ error: 'Chagua miezi 1 hadi 24 au tarehe ya mwisho kwenye kalenda.' });
+
+  const startsAt = new Date();
+  const today = parseMeetingDate(localDate(startsAt))!;
+  const calendarToday = new Date(localDate(startsAt) + 'T00:00:00Z');
+  const maxDate = addMonths(calendarToday, 24).toISOString().slice(0, 10);
+  const endsOn = 'months' in input.data
+    ? addMonths(calendarToday, input.data.months).toISOString().slice(0, 10)
+    : input.data.endsOn;
+  const expiresAt = parseMeetingDate(endsOn);
+  if (!expiresAt || expiresAt <= today || endsOn > maxDate) {
+    return res.status(400).json({ error: 'Tarehe ya kuisha iwe baada ya leo na ndani ya miezi 24.' });
+  }
+
+  const id = String(req.params.id);
+  const updated = await prisma.group.updateMany({
+    where: { id, trialEndsAt: { lte: expiresAt }, OR: [{ paidUntil: null }, { paidUntil: { lte: expiresAt } }] },
+    data: { paidUntil: expiresAt, subscriptionStatus: 'ACTIVE' },
+  });
+  if (!updated.count) {
+    const group = await prisma.group.findUnique({ where: { id }, select: { id: true } });
+    if (!group) return res.status(404).json({ error: 'Kikundi hakipo.' });
+    return res.status(409).json({ error: 'Chagua tarehe inayofika au inayozidi muda wa huduma uliopo.' });
+  }
+  res.json({ startsAt, expiresAt });
 });
 
 router.patch('/groups/:id/status', async (req, res) => {

@@ -23,7 +23,7 @@ dd{margin:4px 0;font-weight:700;overflow-wrap:anywhere}
 #overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:22px 0}
 .metric{background:white;border:1px solid #cbdcd4;border-radius:12px;padding:12px;display:grid;gap:4px;text-align:left;color:#173b35}
 .metric strong{font-size:22px}
-#record{display:grid}
+#record,#service-form{display:grid}
 #record h2,#record p{margin:0}
 .pill.ACTIVE{background:#d3f4e4}.pill.EXPIRED,.pill.SUSPENDED{background:#ffe8df}.pill.TRIAL{background:#e6edff}
 dialog{border:1px solid #a1b8b0;border-radius:16px;max-width:min(540px,95vw)}
@@ -41,6 +41,15 @@ button:disabled{opacity:.45;cursor:auto}
 <p id="status" class="status" role="status"></p><section id="results" aria-label="Vikundi"></section>
 <div class="toolbar"><button id="prev" class="secondary" disabled>Nyuma</button><span id="page"></span><button id="next" class="secondary" disabled>Mbele</button></div>
 <dialog id="payment"><form id="record"><h2 id="selected"></h2><label>Muda wa huduma<select id="period"><option value="1">Mwezi 1</option><option value="3">Miezi 3</option><option value="6">Miezi 6</option><option value="12">Mwaka 1</option><option value="24">Miaka 2</option><option value="custom">Chagua idadi ya miezi</option></select></label><label id="custom" hidden>Miezi (1–24)<input required id="months" type="number" min="1" max="24" value="1" disabled></label><label>Rejea ya malipo<input required id="reference" minlength="3" maxlength="100"></label><p id="total"></p><button id="save">Thibitisha malipo</button><button id="close" type="button" class="secondary">Funga</button><p id="error" class="status" role="status"></p></form></dialog>
+<dialog id="service"><form id="service-form">
+<h2 id="service-group"></h2>
+<p id="service-start"></p>
+<label>Miezi ya huduma<input id="service-months" type="number" min="1" max="24" required value="6"></label>
+<label>Tarehe ambayo huduma itaisha<input id="service-end" type="date" required></label>
+<p>Huduma inaanza leo. Tarehe uliyochagua ikifika saa sita usiku kwa saa za Tanzania, kikundi kitabaki kusoma taarifa zake.</p>
+<p id="service-error" class="status" role="status"></p>
+<div class="actions"><button id="service-save">Washa huduma</button><button id="service-close" class="secondary" type="button">Funga</button></div>
+</form></dialog>
 <script>
 const node=id=>document.getElementById(id);
 const endpoint='/admin';
@@ -70,12 +79,13 @@ function action(label, handler) {
 }
 function render(group){
  const card=el('article',null,'card');card.append(el('h2',group.name),el('span',labels[group.access]||group.access,'pill '+group.access));
- const details=el('dl');for(const [label,value] of [['Kitambulisho',group.id],['Wanachama hai',group._count.members],['Lilianza',date(group.createdAt)],['Majaribio yanaisha',date(group.trialEndsAt)],['Imelipiwa hadi',date(group.paidUntil)]]){
+ const details=el('dl');for(const [label,value] of [['Kitambulisho',group.id],['Wanachama hai',group._count.members],['Lilianza',date(group.createdAt)],['Majaribio yanaisha',date(group.trialEndsAt)],['Huduma hadi',date(group.paidUntil)]]){
   const row=el('div');row.append(el('dt',label),el('dd',String(value)));details.append(row);
  }
  card.append(details);
  const controls=el('div',null,'actions');
  controls.append(action('Rekodi malipo',()=>{selected=group;node('selected').textContent='Rekodi malipo · '+group.name;node('record').reset();node('error').textContent='';updateTotal();node('payment').showModal();}));
+ controls.append(action('Weka muda wa huduma',()=>openService(group)));
  const suspend=group.access!=='SUSPENDED';
  controls.append(action(suspend?'Simamisha':'Rejesha',async()=>{if(!confirm((suspend?'Simamisha ':'Rejesha ')+group.name+'?'))return;try{await api('/groups/'+group.id+'/status','PATCH',{suspended:suspend});if(node('filter').value) filterBy('');else await load();refreshOverview();}catch(e){status.textContent=e.message;}}));
  const history=el('div');controls.append(action('Historia ya malipo',async event=>{const button=event.currentTarget;if(history.childElementCount){history.replaceChildren();return;}button.disabled=true;try{const data=await api('/groups/'+group.id+'/payments');if(!data.payments.length){history.append(el('p','Hakuna malipo yaliyorekodiwa.'));return;}const list=el('ul');for(const payment of data.payments)list.append(el('li',payment.reference+' · '+money(payment.amount)+' · '+date(payment.recordedAt)+' · hadi '+date(payment.paidUntil)));history.append(list);}catch(e){status.textContent=e.message;}finally{button.disabled=false;}}));
@@ -142,6 +152,53 @@ node('record').onsubmit=async event=>{
  finally{node('save').disabled=false;node('close').disabled=false;}
 };
 node('payment').oncancel=event=>{if(node('save').disabled) event.preventDefault();};
+const service=node('service');
+const serviceForm=node('service-form');
+const serviceMonths=node('service-months');
+const serviceEnd=node('service-end');
+let serviceGroup;
+let serviceToday;
+let useCalendar=false;
+function shiftCalendar(dateIso, months){
+ const result=new Date(dateIso+'T00:00:00Z');
+ const day=result.getUTCDate();
+ result.setUTCDate(1);result.setUTCMonth(result.getUTCMonth()+months);
+ const last=new Date(Date.UTC(result.getUTCFullYear(),result.getUTCMonth()+1,0)).getUTCDate();
+ result.setUTCDate(Math.min(day,last));
+ return result.toISOString().slice(0,10);
+}
+function openService(group){
+ serviceGroup=group;
+ serviceForm.reset();
+ serviceToday=new Intl.DateTimeFormat('sv-SE',{timeZone:'Africa/Dar_es_Salaam',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const tomorrow=new Date(Date.parse(serviceToday+'T00:00:00Z')+86400000).toISOString().slice(0,10);
+ serviceEnd.min=tomorrow;serviceEnd.max=shiftCalendar(serviceToday,24);
+ node('service-group').textContent=group.name;
+ node('service-start').textContent='Tarehe ya kuanza: '+serviceToday;
+ node('service-error').textContent='';
+ useCalendar=false;
+ serviceEnd.value=shiftCalendar(serviceToday,Number(serviceMonths.value));
+ service.showModal();
+}
+serviceMonths.oninput=()=>{
+ useCalendar=false;
+ serviceEnd.value=serviceMonths.validity.valid?shiftCalendar(serviceToday,Number(serviceMonths.value)):'';
+};
+serviceEnd.oninput=()=>{useCalendar=true;};
+node('service-close').onclick=()=>service.close();
+service.oncancel=event=>{if(node('service-save').disabled)event.preventDefault();};
+serviceForm.onsubmit=async event=>{
+ event.preventDefault();
+ node('service-save').disabled=true;node('service-close').disabled=true;
+ node('service-error').textContent='';
+ try{
+  const period=useCalendar?{endsOn:serviceEnd.value}:{months:Number(serviceMonths.value)};
+  const response=await api('/groups/'+encodeURIComponent(serviceGroup.id)+'/service-period','PUT',period);
+  service.close();await load();refreshOverview();
+  status.textContent='Huduma imewashwa hadi '+date(response.expiresAt)+'.';
+ }catch(error){node('service-error').textContent=error.message;}
+ finally{node('service-save').disabled=false;node('service-close').disabled=false;}
+};
 refreshOverview();
 void load();
 </script></main></body></html>`; 
