@@ -1,3 +1,4 @@
+import { byMemberName } from '../utils/byMemberName';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { isAxiosError } from 'axios';
@@ -110,7 +111,7 @@ export default function CycleManagement({ canClose, closedAt, preview, reload }:
           </TouchableOpacity>
           {expanded && (
             <>
-              {preview.members.map(member => (
+              {byMemberName(preview.members, member => member.fullName).map(member => (
                 <View key={member.userId} className="mt-2 border-t border-teal-800 pt-2">
                   <Text className="font-bold text-white">{member.fullName}</Text>
                   <Text className="text-teal-100">Papo ya kurejesha {money(member.myPapoMandatoryDebt)} · Fedha za kutoa baada ya marejesho {money(member.payoutAfterPapoRepayment)} · Mgawo halisi {money(member.netPayout)}</Text>

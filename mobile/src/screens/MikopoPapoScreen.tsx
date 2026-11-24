@@ -1,3 +1,4 @@
+import { byMemberName } from '../utils/byMemberName';
 import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
@@ -471,7 +472,7 @@ export default function MikopoPapoScreen() {
                   </Text>
                 </View>
               ) : (
-                activeLoansList.map((l: any) => {
+                byMemberName(activeLoansList, (loan: { user?: { fullName?: string } }) => loan.user?.fullName).map((l: any) => {
                   const totalMonths = Math.max(1, Number(l.repaymentMonths || 1));
                   const principal = Number(l.principalAmount || 0);
                   const totalRepayable = Number(l.totalRepayable || 0);
@@ -811,7 +812,7 @@ export default function MikopoPapoScreen() {
               {loansData?.requireGuarantor && (
                 <>
                   <Text className="text-xs font-bold text-slate-700 mb-2">Chagua Mwanachama Mdhamini:</Text>
-                  {potentialGuarantors.map((g: any) => (
+                  {byMemberName(potentialGuarantors, (member: { fullName?: string }) => member.fullName).map((g: any) => (
                     <TouchableOpacity
                       key={g.id}
                       onPress={() => setSelectedGuarantorId(g.id)}

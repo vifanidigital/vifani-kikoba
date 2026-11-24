@@ -1,3 +1,4 @@
+import { byMemberName } from '../utils/byMemberName';
 import HistoricalEvents from './HistoricalEvents';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
@@ -185,7 +186,7 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
             <View className="mt-4">
               <Text className={'mb-2 font-bold ' + textColor}>Kikao cha {picked}</Text>
               <HistoricalEvents key={picked} date={picked} members={session.members} hasPapo={session.hasPapo} refresh={refresh} />
-              {session.members.map(member => (
+              {byMemberName(session.members, member => member.fullName).map(member => (
                 <View key={member.userId} className="mb-2 rounded-xl border border-slate-400 p-3">
                   <Text className={'font-bold ' + textColor}>{member.fullName}{member.isActive === false ? ' (si hai)' : ''}</Text>
                   {member.record ? (

@@ -1,3 +1,4 @@
+import { byMemberName } from './byMemberName';
 type ArchivedMember = {
   fullName?: string;
   myPapoMandatoryDebt?: number;
@@ -26,7 +27,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char =>
 
 export function cycleReportHtml(report: CycleReport) {
   if (!report?.result || !Array.isArray(report.result.membersPayout)) throw new Error('Ripoti haina orodha iliyohifadhiwa ya mgao.');
-  const rows = report.result.membersPayout.map(member =>
+  const rows = byMemberName(report.result.membersPayout, member => member.fullName).map(member =>
     '<tr><td>' + escapeHtml(member.fullName || 'Mwanachama') + '</td><td>' + money(member.myPapoMandatoryDebt) +
     '</td><td>' + money(member.payoutAfterPapoRepayment) + '</td><td>' + money(member.otherDeductions) +
     '</td><td>' + money(member.balanceToCollect) + '</td><td>' + money(member.netPayout) + '</td></tr>',

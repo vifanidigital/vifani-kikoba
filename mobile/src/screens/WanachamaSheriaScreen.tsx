@@ -1,3 +1,4 @@
+import { byMemberName } from '../utils/byMemberName';
 import MemberPinReset from '../components/MemberPinReset';
 import { AddMemberForm, MemberStatusForm } from '../components/OfficeMemberForms';
 import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
@@ -79,7 +80,7 @@ export default function WanachamaSheriaScreen() {
   const isChairperson = viewerRole === 'CHAIRPERSON';
   const isLeader = LEADER_ROLES.includes(String(viewerRole || ''));
   const group: any = panel.data?.group;
-  const directory = panel.data?.directory ?? [];
+  const directory = byMemberName(panel.data?.directory ?? [], member => member.fullName);
   const loadOffice = panel.reload;
 
   const handleCallMember = (phone: string, name: string) => {

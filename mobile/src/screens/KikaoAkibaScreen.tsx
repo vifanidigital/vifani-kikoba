@@ -1,3 +1,4 @@
+import { byMemberName } from '../utils/byMemberName';
 import MeetingLookup from '../components/MeetingLookup';
 import HistoricalMeetings from '../components/HistoricalMeetings';
 import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
@@ -369,7 +370,7 @@ export default function KikaoAkibaScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
-              {filteredMembers.map((m) => {
+              {byMemberName(filteredMembers, member => member.fullName).map((m) => {
                 const isOpen = expandedMemberId === m.userId;
                 const isDone = Boolean(m.recordedToday);
 

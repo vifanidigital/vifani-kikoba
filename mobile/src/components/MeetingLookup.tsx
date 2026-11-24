@@ -1,3 +1,4 @@
+import { byMemberName } from '../utils/byMemberName';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { isAxiosError } from 'axios';
@@ -70,7 +71,7 @@ export default function MeetingLookup() {
         {!meeting.hasRecords ? <Text className={color}>Hakuna rekodi zilizohifadhiwa kwa tarehe hii.</Text> : <>
           <Text className={'mb-2 ' + color}>Walio na rekodi ya hisa au Jamii: {meeting.membersRecorded}</Text>
           {fields.map(([key, label]) => <Text key={key} className={'py-1 ' + color}>{label}: {money(meeting[key])}</Text>)}
-          {meeting.memberEntries.map((entry, index) => <Text key={entry.id + '-' + index} className={'mt-2 font-bold ' + color}>
+          {byMemberName(meeting.memberEntries, member => member.fullName).map((entry, index) => <Text key={entry.id + '-' + index} className={'mt-2 font-bold ' + color}>
             {entry.fullName} · Hisa {entry.sharesCount} ({money(entry.amountPaid)}) · Jamii {money(entry.socialFundPaid)}
           </Text>)}
         </>}

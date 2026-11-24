@@ -1,3 +1,4 @@
+import { byMemberName } from '../utils/byMemberName';
 import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { isAxiosError } from 'axios';
@@ -74,7 +75,7 @@ export default function HistoricalEvents({ date, members, hasPapo, refresh }: {
     )}</View>
     {kind && <View className="mt-3 gap-2">
       <Text className="text-white">Chagua mwanachama</Text>
-      <View className="flex-row flex-wrap gap-2">{members.map(member =>
+      <View className="flex-row flex-wrap gap-2">{byMemberName(members, member => member.fullName).map(member =>
         chip(member.userId, member.fullName, member.userId === userId, () => { setUserId(member.userId); setDebtId(''); }),
       )}</View>
       {userId && debts && <View className="flex-row flex-wrap gap-2">
