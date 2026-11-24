@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import type { Prisma } from '@prisma/client';
 import { test } from 'node:test';
 import { blankRepaymentPlan, calendarLoanDue, quotePayment, repaymentQuote } from '../src/lib/loanRepayment';
-import { ensureQueue } from '../src/routes/loanQueue';
+import { ensureQueue, takeLoanTurn } from '../src/routes/loanQueue';
 
 test('first interest is mandatory and second interest uses outstanding principal on the local due day', () => {
   const start = new Date('2026-01-31T11:28:00Z');
@@ -22,4 +23,22 @@ test('first interest is mandatory and second interest uses outstanding principal
 test('queue skips inactive members, appends new members and wraps after the last turn', () => {
   assert.deepEqual(ensureQueue({ order: ['a','b','c'], previous: 'a', swaps: [] }, ['a','c','d']), { order: ['a','b','c','d'], next: 'c' });
   assert.equal(ensureQueue({ order: ['a','b','c'], previous: 'c', swaps: [] }, ['a','b','c']).next, 'a');
+});
+
+test('the server rejects out-of-turn applications until an accepted swap puts the member first', async () => {
+  let queue = { order: ['a', 'b'], previous: null as string | null, swaps: [{ from: 'b', to: 'a', status: 'PENDING' }] };
+  let writes = 0;
+  const tx = {
+    $queryRaw: async () => [],
+    group: {
+      findUniqueOrThrow: async () => ({ loanQueue: queue, cycleClosedAt: null }),
+      update: async ({ data }: { data: { loanQueue: typeof queue } }) => { queue = data.loanQueue; writes++; },
+    },
+    groupMember: { findMany: async () => [{ userId: 'a' }, { userId: 'b' }] },
+  } as unknown as Prisma.TransactionClient;
+  await assert.rejects(takeLoanTurn(tx, 'group', 'b'), /Subiri zamu yako/);
+  assert.equal(writes, 0);
+  queue = { ...queue, order: ['b', 'a'], swaps: [{ from: 'b', to: 'a', status: 'ACCEPTED' }] };
+  await takeLoanTurn(tx, 'group', 'b');
+  assert.equal(queue.previous, 'b');
 });

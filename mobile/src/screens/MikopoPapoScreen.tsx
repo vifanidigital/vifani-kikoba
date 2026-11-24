@@ -125,6 +125,9 @@ export default function MikopoPapoScreen() {
     }
   };
   const handleApplyLoan = async () => {
+    if (!canApply) {
+      return Alert.alert('Subiri zamu yako', 'Unaweza kuomba kubadilishana namba kwenye foleni. Zamu itabadilika mwenzako akikubali.');
+    }
     if (!numericLoan || numericLoan <= 0) {
       return Alert.alert('Angalia Kiasi', 'Ingiza kiasi sahihi cha mkopo.');
     }
@@ -857,12 +860,12 @@ export default function MikopoPapoScreen() {
 
               <TouchableOpacity
                 onPress={handleApplyLoan}
-                disabled={submitting || numericLoan <= 0 || isLoanExceeding}
+                disabled={submitting || !canApply || numericLoan <= 0 || isLoanExceeding}
                 className={`p-4 rounded-xl items-center mt-2 mb-4 ${
-                  isLoanExceeding || numericLoan <= 0 ? 'bg-slate-400' : 'bg-teal-700'
+                  !canApply || isLoanExceeding || numericLoan <= 0 ? 'bg-slate-400' : 'bg-teal-700'
                 }`}
               >
-                {submitting ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Tuma Ombi la Mkopo</Text>}
+                {submitting ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">{canApply ? 'Tuma Ombi la Mkopo' : 'Subiri zamu yako'}</Text>}
               </TouchableOpacity>
             </FormScrollView>
           </KeyboardAvoidingView>
