@@ -702,13 +702,25 @@ export default function DashboardScreen() {
             </View>
           )}
 
+          {(Number(feed?.loanPaymentsPending || 0) + Number(feed?.papoRequestsPending || 0) + Number(feed?.swapRequestsPending || 0) > 0 || feed?.requestFeedback?.length > 0) && (
+            <View className={`mb-4 rounded-2xl border p-4 ${cardClass}`}>
+              <Text className={`mb-2 font-bold ${textMain}`}>Maombi na mrejesho</Text>
+              {feed?.loanPaymentsPending > 0 && <Text className={textMain}>Marejesho ya mkopo yanayosubiri uhakiki: {feed.loanPaymentsPending}</Text>}
+              {feed?.papoRequestsPending > 0 && <Text className={textMain}>Maombi ya Papo yanayosubiri uamuzi: {feed.papoRequestsPending}</Text>}
+              {feed?.swapRequestsPending > 0 && <Text className={textMain}>Maombi ya kubadilishana namba: {feed.swapRequestsPending}</Text>}
+              {Array.isArray(feed?.requestFeedback) && feed.requestFeedback.map((item: { id: string; message: string }) =>
+                <Text key={item.id} className={`mt-1 ${textSub}`}>{item.message}</Text>,
+              )}
+            </View>
+          )}
+
           {myActiveLoans.length > 0 && (
             <View className="mb-4">
               <Text className={`text-xs font-bold uppercase mb-2 ${textSub}`}>
                 Kumbukumbu ya Deni Langu Hai
               </Text>
               {myActiveLoans.map((ml: any) => {
-                const remaining = Math.max(0, Number(ml.totalRepayable || 0) - Number(ml.amountPaid || 0));
+                const remaining = ml.repaymentQuote?.dueBalance ?? Math.max(0, Number(ml.totalRepayable || 0) - Number(ml.amountPaid || 0));
                 return (
                   <View key={ml.id} className={`p-4 rounded-2xl border mb-2.5 ${cardClass}`}>
                     <View className="flex-row justify-between items-center">

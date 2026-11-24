@@ -49,6 +49,7 @@ model Group {
   cycleStartedAt DateTime?
   cycleClosedAt DateTime?
   cycleArchives CycleArchive[]
+  loanQueue Json?
   cycleMonths         Int      @default(12)
   shareValue          Float    @default(5000)
   minSharesPerMeeting Int      @default(1)
@@ -169,6 +170,7 @@ model PapoAccount {
 }
 
 model PapoTopUp {
+  feedback String?
   id              String    @id @default(uuid())
   groupId         String
   group           Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -184,6 +186,7 @@ model PapoTopUp {
 }
 
 model Loan {
+  feedback String?
   id              String         @id @default(uuid())
   groupId         String
   group           Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -196,6 +199,7 @@ model Loan {
   amountPaid      Float          @default(0)
   dueDate         DateTime?
   nextInterestDue DateTime?
+  repaymentPlan Json?
   guarantorId     String?
   guarantor       User?          @relation("LoanGuarantor", fields: [guarantorId], references: [id])
   guarantorStatus String         @default("PENDING")

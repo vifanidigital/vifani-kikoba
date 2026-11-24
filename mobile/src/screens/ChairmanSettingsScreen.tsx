@@ -48,10 +48,8 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
   const [topUpWeeks, setTopUpWeeks] = useState('4');
 
   // 4. Sheria za Mkopo Mkubwa & Udhibiti wa Madeni
-  const [interestRate, setInterestRate] = useState('10');
   const [loanMultiplier, setLoanMultiplier] = useState('3');
   const [maxBigLoanCap, setMaxBigLoanCap] = useState('1000000');
-  const [maxMonths, setMaxMonths] = useState('3');
   const [gracePeriodDays, setGracePeriodDays] = useState('3');
   const [requireGuarantor, setRequireGuarantor] = useState(true);
   const [minGuarantorsCount, setMinGuarantorsCount] = useState('1');
@@ -96,10 +94,8 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
         setMaxTopUpCap(String(g.maxTopUpPapoCap ?? 100000));
         setTopUpWeeks(String(g.topUpPapoWeeks ?? 4));
 
-        setInterestRate(String(g.interestRate ?? 10));
         setLoanMultiplier(String(g.loanLimitMultiplier ?? 3));
         setMaxBigLoanCap(String(g.maxBigLoanCap ?? 0));
-        setMaxMonths(String(g.maxRepaymentMonths ?? 3));
         setGracePeriodDays(String(g.gracePeriodDays ?? 3));
         setRequireGuarantor(Boolean(g.requireGuarantor));
         setMinGuarantorsCount(String(g.minGuarantorsCount ?? 1));
@@ -161,10 +157,8 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
         minTopUpPapoCap: Number(minTopUpCap),
         maxTopUpPapoCap: Number(maxTopUpCap),
         topUpPapoWeeks: Number(topUpWeeks),
-        interestRate: Number(interestRate),
         loanLimitMultiplier: Number(loanMultiplier),
         maxBigLoanCap: Number(maxBigLoanCap),
-        maxRepaymentMonths: Number(maxMonths),
         gracePeriodDays: Number(gracePeriodDays),
         requireGuarantor,
         minGuarantorsCount: Number(minGuarantorsCount),
@@ -467,9 +461,8 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Riba ya Mkopo (%)</Text>
               <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
-                keyboardType="numeric"
-                value={interestRate}
-                onChangeText={(t) => setInterestRate(num(t))}
+                editable={false}
+                value="10%"
               />
             </View>
           </View>
@@ -487,9 +480,8 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Muda wa Juu (Miezi)</Text>
               <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
-                keyboardType="numeric"
-                value={maxMonths}
-                onChangeText={(t) => setMaxMonths(num(t))}
+                editable={false}
+                value="Miezi 2"
               />
             </View>
             <View className="flex-1">

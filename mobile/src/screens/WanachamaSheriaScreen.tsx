@@ -16,7 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { apiClient } from '../api/client';
@@ -119,7 +119,7 @@ export default function WanachamaSheriaScreen() {
       `IBARA YA 3: MFUKO WA JAMII\n` +
       `Mfuko wa jamii utatumika kusaidia wanachama wakati wa misiba, maradhi makubwa au sherehe rasmi kama ilivyokubaliwa kikaoni.\n\n` +
       `IBARA YA 4: MIKOPO NA RIBA\n` +
-      `Mwanachama atakopa hadi mara ${group?.loanLimitMultiplier || 3} ya thamani ya hisa zake kwa riba ya ${group?.interestRate || 10}% ndani ya miezi ${group?.maxRepaymentMonths || 3}.\n\n` +
+      `Mwanachama atakopa hadi mara ${group?.loanLimitMultiplier || 3} ya thamani ya hisa zake ndani ya miezi miwili. Riba ya kwanza ni 10% ya mkopo. Riba ya pili ni 10% ya mtaji uliobaki, ni hiari kabla ya tarehe yake na ni lazima tarehe hiyo ikifika.\n\n` +
       `IBARA YA 5: NIDHAMU NA FAINI\n` +
       `Mwanachama atakayechelewa kikao, kutofika bila taarifa au kuchelewesha marejesho atalipa faini kulingana na sheria za kikundi.\n\n` +
       `IBARA YA 6: KUVUNJA KIKOBA (GAWIO)\n` +
@@ -161,7 +161,10 @@ export default function WanachamaSheriaScreen() {
     }
   };
 
+  const [sharingConstitution, setSharingConstitution] = useState(false);
   const handleShareConstitutionPdf = async () => {
+    if (sharingConstitution) return;
+    setSharingConstitution(true);
     try {
       const safeGroupName = String(group?.name || 'KIKOBA')
         .replace(/&/g, '&amp;')
@@ -188,7 +191,7 @@ export default function WanachamaSheriaScreen() {
               <strong>Muhtasari wa Masharti ya Fedha:</strong><br/>
               • Thamani ya Hisa: TZS ${Number(group?.shareValue || 0).toLocaleString()} (Hisa ${group?.minSharesPerMeeting}-${group?.maxSharesPerMeeting} kwa kikao)<br/>
               • Mfuko wa Jamii: TZS ${Number(group?.socialFundMin || 0).toLocaleString()} - TZS ${Number(group?.socialFundMax || 0).toLocaleString()}<br/>
-              • Riba ya Papo: ${group?.papoMeetingInterest || 0}% | Riba ya Mkopo Mkubwa: ${group?.interestRate || 10}% (Miezi ${group?.maxRepaymentMonths})
+              • Riba ya Papo: ${group?.papoMeetingInterest || 0}% | Riba ya Mkopo Mkubwa: 10% (miezi 2)
             </div>
             <p style="margin-top: 20px; font-size: 10px; color: #64748b; text-align: center;">
               Imetolewa kupitia Mfumo wa Vifani Jamii • ${new Date().toLocaleDateString('sw-TZ')}
@@ -197,18 +200,26 @@ export default function WanachamaSheriaScreen() {
         </html>
       `;
 
-      const { uri } = await Print.printToFileAsync({ html });
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
-          dialogTitle: `Katiba ya ${group?.name || 'Kikundi'}` });
-      } else {
+      if (Platform.OS === 'web' || !(await Sharing.isAvailableAsync())) {
         await Print.printAsync({ html });
+        return;
       }
+      const { uri } = await Print.printToFileAsync({ html });
+      const generated = new File(uri);
+      if (!generated.exists || !generated.size) throw new Error('PDF haikutengenezwa.');
+      const filename = String(group?.name || 'Kikundi').replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 45) || 'Kikundi';
+      const named = new File(Paths.cache, 'Katiba-' + filename + '-' + Date.now() + '.pdf');
+      generated.move(named);
+      await Sharing.shareAsync(named.uri, {
+        mimeType: 'application/pdf',
+        UTI: 'com.adobe.pdf',
+        dialogTitle: 'Shiriki Katiba ya Kikundi',
+      });
     } catch (err: any) {
       console.log('PDF Error:', err?.message);
       Alert.alert('Hitilafu ya PDF', err?.message || 'Imeshindikana kutengeneza PDF ya Katiba.');
+    } finally {
+      setSharingConstitution(false);
     }
   };
   const handleSaveConstitution = async () => {
@@ -523,7 +534,7 @@ export default function WanachamaSheriaScreen() {
                     <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
                       <Text className={`text-xs ${textSub}`}>Riba ya Mkopo Mkubwa & Muda:</Text>
                       <Text className={`text-xs font-bold ${textMain}`}>
-                        {group?.interestRate || 10}% (Miezi {group?.maxRepaymentMonths})
+                        10% (miezi 2)
                       </Text>
                     </View>
                     <View className="flex-row justify-between py-1.5 border-b border-slate-200/20">
@@ -691,8 +702,8 @@ export default function WanachamaSheriaScreen() {
                         <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
-                          value={String(rulesForm.interestRate ?? '')}
-                          onChangeText={(t) => setRulesForm({ ...rulesForm, interestRate: t.replace(/[^0-9.]/g, '') })}
+                          value="10%"
+                          editable={false}
                         />
                       </View>
                       <View className="flex-1">
@@ -700,8 +711,8 @@ export default function WanachamaSheriaScreen() {
                         <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
-                          value={String(rulesForm.maxRepaymentMonths ?? '')}
-                          onChangeText={(t) => setRulesForm({ ...rulesForm, maxRepaymentMonths: t.replace(/[^0-9]/g, '') })}
+                          value="Miezi 2"
+                          editable={false}
                         />
                       </View>
                     </View>
@@ -805,11 +816,12 @@ export default function WanachamaSheriaScreen() {
                 </View>
                 <View className="flex-row gap-2">
                   <TouchableOpacity
+                    disabled={sharingConstitution}
                     onPress={handleShareConstitutionPdf}
                     className="bg-indigo-600 px-3 py-1.5 rounded-xl flex-row items-center gap-1"
                   >
                     <Ionicons name="share-social-outline" size={14} color="#fff" />
-                    <Text className="text-white font-bold text-xs">PDF</Text>
+                    <Text className="text-white font-bold text-xs">{sharingConstitution ? 'Inaandaa PDF...' : 'Shiriki PDF'}</Text>
                   </TouchableOpacity>
                   {isChairperson && (
                     <TouchableOpacity

@@ -1,5 +1,6 @@
 import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
-import React, { useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -18,7 +19,8 @@ import { useTheme } from '../context/ThemeContext';
 import { useTabData } from '../api/useTabData';
 import TopTabs from '../components/TopTabs';
 import TabDataNotice from '../components/TabDataNotice';
-import { parsePapo, parseLoans } from '../api/tabResponses';
+import { DeclineRequest, LoanPaymentPanel, LoanQueuePanel } from '../components/LoanWorkflows';
+import { parsePapo, parseLoans, parseLoanQueue } from '../api/tabResponses';
 
 export default function MikopoPapoScreen() {
   const insets = useSafeAreaInsets();
@@ -40,6 +42,18 @@ export default function MikopoPapoScreen() {
   const scope = `${activeGroup?.id}_${user?.id}_${role}`;
   const papo = useTabData('/papo/status', scope, parsePapo);
   const loans = useTabData('/loans', scope, parseLoans);
+  const queue = useTabData('/loans/queue', scope, parseLoanQueue);
+  const { reload: reloadLoans } = loans;
+  const { reload: reloadQueue } = queue;
+  const { reload: reloadPapo } = papo;
+  useFocusEffect(useCallback(() => {
+    const timer = setInterval(() => {
+      if (activeTab === 'LOANS') void Promise.all([reloadLoans(), reloadQueue()]);
+      else void reloadPapo();
+    }, 25000);
+    return () => clearInterval(timer);
+  }, [activeTab, reloadLoans, reloadQueue, reloadPapo]));
+  const canApply = queue.data?.next === user?.id && !!user?.id;
   const papoData: any = papo.data;
   const loansData: any = loans.data;
   const panel = activeTab === 'PAPO' ? papo : loans;
@@ -132,6 +146,7 @@ export default function MikopoPapoScreen() {
       setLoanAmount('');
       setSelectedGuarantorId('');
       void loans.reload();
+      void queue.reload();
     } catch (error: any) {
       Alert.alert('Imeshindikana', error.response?.data?.error || 'Hitilafu imetokea.');
     } finally {
@@ -186,16 +201,14 @@ export default function MikopoPapoScreen() {
 
   const rawLoans = Array.isArray(loansData?.loans) ? loansData.loans : [];
   const allLoans = isLeader ? rawLoans : rawLoans.filter((l: any) => l.userId === user?.id);
-  const activeLoansList = allLoans.filter((l: any) => l.status !== 'PAID');
+  const activeLoansList = allLoans;
   const guarantorRequests = Array.isArray(loansData?.guarantorRequests) ? loansData.guarantorRequests : [];
   const potentialGuarantors = Array.isArray(loansData?.potentialGuarantors) ? loansData.potentialGuarantors : [];
   const topUps = Array.isArray(papoData?.topUps) ? papoData.topUps : [];
   const pendingTopUps = Array.isArray(papoData?.pendingTopUpRequests) ? papoData.pendingTopUpRequests : [];
   const repayingTopUps = Array.isArray(papoData?.repayingTopUpRequests) ? papoData.repayingTopUpRequests : [];
 
-  const monthlyLoanInterest = Math.round((numericLoan * interestRatePct) / 100);
-  const calculatedLoanInterest = monthlyLoanInterest * fixedMonths;
-  const totalRepayablePreview = numericLoan + calculatedLoanInterest;
+  const monthlyLoanInterest = Math.round(numericLoan * interestRatePct) / 100;
   const topUpEstimatedInterest = Math.round(
     (numericTopUp * Number(papoData?.papoMeetingInterestRate || 0)) / 100
   );
@@ -229,7 +242,7 @@ export default function MikopoPapoScreen() {
         refreshControl={
           <RefreshControl
             refreshing={panel.loading && panel.data != null}
-            onRefresh={panel.reload}
+            onRefresh={() => { void panel.reload(); if (activeTab === 'LOANS') void queue.reload(); }}
           />
         }
       >
@@ -317,6 +330,7 @@ export default function MikopoPapoScreen() {
                           >
                             <Text className="text-white font-bold text-xs">Idhinisha & Anza Hesabu ya Majuma</Text>
                           </TouchableOpacity>
+                          <DeclineRequest path={'/papo/decline/' + pt.id + '/application'} reload={papo.reload} />
                         </View>
                       ))}
                     </View>
@@ -339,19 +353,18 @@ export default function MikopoPapoScreen() {
                           >
                             <Text className="text-white font-bold text-xs">Thibitisha Marejesho & Futa Deni</Text>
                           </TouchableOpacity>
+                          <DeclineRequest path={'/papo/decline/' + rt.id + '/repayment'} reload={papo.reload} />
                         </View>
                       ))}
                     </View>
                   )}
 
-                  {topUps.filter((t: any) => t.status !== 'PAID').length > 0 && (
+                  {topUps.length > 0 && (
                     <>
                       <Text className={`font-bold text-xs uppercase mb-2 ${textSub}`}>
-                        Papo Zako za Hiari Zinazoendelea
+                        Papo Zako za Hiari
                       </Text>
-                      {topUps
-                        .filter((t: any) => t.status !== 'PAID')
-                        .map((t: any) => (
+                      {topUps.map((t: any) => (
                           <View key={t.id} className={`p-4 rounded-2xl mb-3 border ${cardClass}`}>
                             <View className="flex-row justify-between items-center">
                               <Text className={`font-extrabold text-sm ${textMain}`}>
@@ -366,6 +379,7 @@ export default function MikopoPapoScreen() {
                             <Text className={`text-xs mt-1 ${textSub}`}>
                               Riba ya Kikao: <Text className="font-bold text-rose-600">TZS {Number(t.interestPerMeeting || 0).toLocaleString()}</Text>
                             </Text>
+                            {t.feedback ? <Text className={textMain}>Mrejesho: {t.feedback}</Text> : null}
                             {t.dueDate && (
                               <Text className={`text-xs mt-0.5 ${textSub}`}>
                                 Tarehe ya Kurejesha: <Text className="font-bold">{new Date(t.dueDate).toLocaleDateString('sw-TZ')}</Text> •{' '}
@@ -389,6 +403,7 @@ export default function MikopoPapoScreen() {
             </>
           ) : (
             <>
+              <LoanQueuePanel key={scope} data={queue.data} userId={user?.id} chair={role === 'CHAIRPERSON'} reload={queue.reload} error={queue.error} />
               <View className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg mb-4">
                 <View className="flex-row justify-between items-center mb-1">
                   <Text className="text-slate-400 text-xs font-bold uppercase">Ukomo Wako wa Mkopo</Text>
@@ -414,14 +429,14 @@ export default function MikopoPapoScreen() {
 
                 <TouchableOpacity
                   onPress={() => setShowLoanModal(true)}
-                  disabled={effectiveMaxLoan <= 0}
+                  disabled={effectiveMaxLoan <= 0 || !canApply}
                   className={`p-3.5 rounded-xl items-center mt-4 flex-row justify-center gap-2 ${
-                    effectiveMaxLoan <= 0 ? 'bg-slate-700' : 'bg-teal-600'
+                    effectiveMaxLoan <= 0 || !canApply ? 'bg-slate-700' : 'bg-teal-600'
                   }`}
                 >
                   <Ionicons name="cash-outline" size={20} color="#fff" />
                   <Text className="text-white font-bold text-sm">
-                    {effectiveMaxLoan <= 0 ? 'Ongeza Hisa Ili Kukopa' : 'Omba Mkopo Mkubwa'}
+                    {effectiveMaxLoan <= 0 ? 'Ongeza Hisa Ili Kukopa' : canApply ? 'Omba Mkopo Mkubwa' : 'Subiri zamu yako ya mkopo'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -464,7 +479,7 @@ export default function MikopoPapoScreen() {
                   <Ionicons name="checkmark-done-circle-outline" size={34} color="#0f766e" />
                   <Text className={`font-bold text-sm mt-2 ${textMain}`}>Hakuna Mkopo Unaoendelea</Text>
                   <Text className={`text-xs text-center mt-1 ${textSub}`}>
-                    Mikopo yote iliyokamilika imefutwa kwenye orodha ya madeni hai.
+                    Maombi na mrejesho wako utaonekana hapa.
                   </Text>
                 </View>
               ) : (
@@ -473,8 +488,8 @@ export default function MikopoPapoScreen() {
                   const principal = Number(l.principalAmount || 0);
                   const totalRepayable = Number(l.totalRepayable || 0);
                   const paid = Number(l.amountPaid || 0);
-                  const remaining = Math.max(0, totalRepayable - paid);
-                  const progressPct = totalRepayable > 0 ? Math.min(100, Math.round((paid / totalRepayable) * 100)) : 0;
+                  const remaining = l.repaymentQuote?.dueBalance ?? Math.max(0, totalRepayable - paid);
+                  const progressPct = l.repaymentPlan && principal > 0 ? Math.min(100, Math.round(l.repaymentPlan.principalPaid / principal * 100)) : totalRepayable > 0 ? Math.min(100, Math.round((paid / totalRepayable) * 100)) : 0;
 
                   const totalInt = Math.max(0, totalRepayable - principal);
                   const monthlyInt = Math.round(totalInt / totalMonths);
@@ -484,6 +499,7 @@ export default function MikopoPapoScreen() {
                   const hasNextInterest = l.nextInterestInstallment !== null && nextInterest > 0;
                   const isFinalMonth = nextMonth >= totalMonths;
 
+                  const statuses: Record<string, string> = { PENDING: 'Inasubiri idhini', DISBURSED: 'Imetolewa', OVERDUE: 'Imechelewa', REPAYMENT_PENDING: 'Inasubiri uhakiki', PAID: 'Imelipwa', REJECTED: 'Imekataliwa' };
                   return (
                     <View key={l.id} className={`p-4 rounded-2xl mb-3 border ${cardClass}`}>
                       <View className="flex-row justify-between items-start">
@@ -503,11 +519,15 @@ export default function MikopoPapoScreen() {
                               l.status === 'OVERDUE' ? 'text-rose-700' : 'text-slate-800'
                             }`}
                           >
-                            {l.status}
+                            {statuses[l.status] ?? l.status}
                           </Text>
                         </View>
                       </View>
 
+                      {l.feedback ? <Text className={textMain}>Mrejesho: {l.feedback}</Text> : null}
+                      {isLeader && l.status === 'PENDING' && <DeclineRequest path={'/loans/reject/' + l.id} reload={loans.reload} />}
+                      {l.repaymentQuote && <LoanPaymentPanel id={l.id} quote={l.repaymentQuote} latest={l.repaymentPlan?.latest ?? null}
+                        history={l.repaymentPlan?.history ?? []} mine={l.userId === user?.id} chair={role === 'CHAIRPERSON'} status={l.status} reload={loans.reload} />}
                       <View className="flex-row justify-between mt-3 pt-2 border-t border-slate-200/20">
                         <Text className={`text-xs ${textSub}`}>
                           Mkopo: <Text className={`font-bold ${textMain}`}>TZS {principal.toLocaleString()}</Text>
@@ -527,7 +547,7 @@ export default function MikopoPapoScreen() {
                         </View>
                       </View>
 
-                      {(l.status === 'DISBURSED' || l.status === 'OVERDUE' || l.status === 'REPAYMENT_PENDING') && (
+                      {!l.repaymentPlan && (l.status === 'DISBURSED' || l.status === 'OVERDUE' || l.status === 'REPAYMENT_PENDING') && (
                         <View className="mt-2.5 pt-2 border-t border-slate-200/20">
                           <Text className={`text-[11px] font-bold ${textSub}`}>
                             Mwezi wa {nextMonth}/{totalMonths}:{' '}
@@ -549,7 +569,7 @@ export default function MikopoPapoScreen() {
                         </TouchableOpacity>
                       )}
 
-                      {isLeader && hasNextInterest && !isFinalMonth && (l.status === 'DISBURSED' || l.status === 'OVERDUE') && (
+                      {!l.repaymentPlan && isLeader && hasNextInterest && !isFinalMonth && (l.status === 'DISBURSED' || l.status === 'OVERDUE') && (
                         <TouchableOpacity
                           onPress={async () => {
                             try {
@@ -568,7 +588,7 @@ export default function MikopoPapoScreen() {
                         </TouchableOpacity>
                       )}
 
-                      {l.userId === user?.id && (l.status === 'DISBURSED' || l.status === 'OVERDUE') && (
+                      {!l.repaymentPlan && l.userId === user?.id && (l.status === 'DISBURSED' || l.status === 'OVERDUE') && (
                         <TouchableOpacity
                           onPress={() => handleRequestRepayLoan(l.id)}
                           className="bg-indigo-600 py-2.5 rounded-xl items-center mt-2.5"
@@ -577,7 +597,7 @@ export default function MikopoPapoScreen() {
                         </TouchableOpacity>
                       )}
 
-                      {isLeader && l.status === 'REPAYMENT_PENDING' && (
+                      {!l.repaymentPlan && isLeader && l.status === 'REPAYMENT_PENDING' && (
                         <TouchableOpacity
                           onPress={() => handleConfirmRepayLoan(l.id)}
                           className="bg-emerald-700 py-2.5 rounded-xl items-center mt-2.5"
@@ -800,13 +820,13 @@ export default function MikopoPapoScreen() {
 
               <View className="bg-teal-50 p-3.5 rounded-xl border border-teal-200 mb-4">
                 <Text className="text-xs text-teal-900">
-                  Riba ya Kila Mwezi ({interestRatePct}%): <Text className="font-bold">TZS {monthlyLoanInterest.toLocaleString()}</Text>
+                  Riba ya kwanza ({interestRatePct}%): <Text className="font-bold">TZS {monthlyLoanInterest.toLocaleString()}</Text>
                 </Text>
                 <Text className="text-xs text-teal-900 mt-1">
-                  Jumla ya Riba (Miezi {fixedMonths}): <Text className="font-bold">TZS {calculatedLoanInterest.toLocaleString()}</Text>
+                  Riba ya pili ni 10% ya mtaji uliobaki. Ni hiari kabla ya tarehe ya pili, na lazima tarehe hiyo ikifika.
                 </Text>
                 <Text className="text-xs text-teal-950 mt-1 pt-1 border-t border-teal-200">
-                  Jumla ya Kurejesha: <Text className="font-extrabold">TZS {totalRepayablePreview.toLocaleString()}</Text>
+                  Mtaji na riba ya kwanza: <Text className="font-extrabold">TZS {(numericLoan + monthlyLoanInterest).toLocaleString()}</Text>
                 </Text>
               </View>
 

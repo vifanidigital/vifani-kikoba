@@ -44,9 +44,7 @@ export default function RegisterGroupScreen() {
   const [socialFundAmount, setSocialFundAmount] = useState('2000');
 
   // Hatua C: Mikopo & Papo
-  const [interestRate, setInterestRate] = useState('10');
   const [loanLimitMultiplier, setLoanLimitMultiplier] = useState('3');
-  const [maxRepaymentMonths, setMaxRepaymentMonths] = useState('3');
   const [hasPapo, setHasPapo] = useState(true);
   const [mandatoryPapoAmount, setMandatoryPapoAmount] = useState('50000');
   const [papoMeetingInterest, setPapoMeetingInterest] = useState('10');
@@ -144,9 +142,7 @@ export default function RegisterGroupScreen() {
         contributionFreq,
         latePenalty: Number(latePenalty) || 0,
         socialFundAmount: Number(socialFundAmount) || 0,
-        interestRate: interestRate === '' ? 10 : Number(interestRate),
         loanLimitMultiplier: Math.max(1, Number(loanLimitMultiplier) || 3),
-        maxRepaymentMonths: Math.max(1, Number(maxRepaymentMonths) || 3),
         hasPapo,
         mandatoryPapoAmount: hasPapo ? Number(mandatoryPapoAmount) : 0,
         papoMeetingInterest: hasPapo ? Number(papoMeetingInterest) : 0,
@@ -353,9 +349,8 @@ export default function RegisterGroupScreen() {
               <Text className="text-xs font-bold text-slate-700 mb-1.5 uppercase">Riba ya Mkopo Mkubwa (%)</Text>
               <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 mb-3 text-slate-900 font-bold"
-                keyboardType="numeric"
-                value={interestRate}
-                onChangeText={(t) => setInterestRate(onlyDigits(t))}
+                editable={false}
+                value="10%"
               />
 
               <View className="flex-row gap-2 mb-4">
@@ -372,9 +367,8 @@ export default function RegisterGroupScreen() {
                   <Text className="text-[11px] font-bold text-slate-700 mb-1">Muda wa Mkopo (Miezi)</Text>
                   <FormTextInput
                     className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-900 font-bold"
-                    keyboardType="numeric"
-                    value={maxRepaymentMonths}
-                    onChangeText={(t) => setMaxRepaymentMonths(onlyDigits(t))}
+                    editable={false}
+                    value="Miezi 2"
                   />
                 </View>
               </View>

@@ -1,3 +1,4 @@
+import { currentLoanQuote, RepaymentPlan } from '../lib/loanRepayment';
 import historicalMeetings from './historicalMeetings';
 import { localDate, parseMeetingDate } from '../lib/meetingCalendar';
 import { interestTiming } from '../lib/loanInterest';
@@ -70,6 +71,13 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
     let loansPrincipalOut = 0;
 
     for (const l of allLoans) {
+      const modern = currentLoanQuote(l);
+      if (modern) {
+        const plan = l.repaymentPlan as RepaymentPlan;
+        totalLoanInterestCollected += Math.max(0, l.amountPaid - plan.principalPaid);
+        if (['DISBURSED', 'OVERDUE', 'REPAYMENT_PENDING'].includes(l.status)) loansPrincipalOut += modern.principalRemaining;
+        continue;
+      }
       const interestPortion = Math.max(0, (l.totalRepayable || 0) - (l.principalAmount || 0));
       totalLoanInterestCollected += Math.min(interestPortion, l.amountPaid || 0);
       if (l.status === 'DISBURSED' || l.status === 'OVERDUE') {
@@ -91,7 +99,7 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
 
     const myLoansDebt = allLoans
       .filter((l) => l.userId === userId && (l.status === 'DISBURSED' || l.status === 'OVERDUE'))
-      .reduce((s, l) => s + Math.max(0, (l.totalRepayable || 0) - (l.amountPaid || 0)), 0);
+      .reduce((s, l) => s + (currentLoanQuote(l)?.dueBalance ?? Math.max(0, (l.totalRepayable || 0) - (l.amountPaid || 0))), 0);
 
     const myPapoTopUpDebt = allTopUps
       .filter((t) => t.userId === userId && (t.status === 'ACTIVE' || t.status === 'OVERDUE'))

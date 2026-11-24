@@ -1,3 +1,5 @@
+import { LoanQueue } from './loanQueue';
+import { currentLoanQuote } from '../lib/loanRepayment';
 import { calculateShareOut } from '../lib/shareOut';
 import { createHash } from 'node:crypto';
 import { Router, Response, NextFunction } from 'express';
@@ -31,7 +33,7 @@ async function loadCycle(db: CycleDb, groupId: string) {
   if (!group) return null;
   const result = calculateShareOut({
     members: memberships.map(member => ({ userId: member.userId, fullName: member.user.fullName, isActive: member.isActive })),
-    shares, papoAccounts, loans, topUps,
+    shares, papoAccounts, loans: loans.map(loan => ({ ...loan, totalRepayable: loan.amountPaid + (currentLoanQuote(loan)?.dueBalance ?? (loan.totalRepayable - loan.amountPaid)) })), topUps,
     mandatoryPapoAmount: group.hasPapo ? group.mandatoryPapoAmount : 0,
     periodicPapo: transactions.filter(row => row.type === 'PAPO_INTEREST'),
     interest: transactions.filter(row => row.type === 'LOAN_INTEREST_REPAYMENT'),
@@ -113,13 +115,14 @@ router.post('/cycles/restart', authenticateToken, async (req: AuthRequest, res) 
   if (req.body?.confirmed !== true) return res.status(400).json({ error: 'Thibitisha kuanzisha mzunguko mpya.' });
   await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "Group" WHERE id = ${groupId} FOR UPDATE`;
-    const group = await tx.group.findUnique({ where: { id: groupId }, select: { cycleClosedAt: true, hasPapo: true, mandatoryPapoAmount: true } });
+    const group = await tx.group.findUnique({ where: { id: groupId }, select: { cycleClosedAt: true, hasPapo: true, mandatoryPapoAmount: true, loanQueue: true } });
     if (!group?.cycleClosedAt) throw new CycleConflict('Funga mzunguko uliopo kwanza.');
     const where = { groupId };
     const archive = await tx.cycleArchive.findFirst({ where: { groupId, closedAt: group.cycleClosedAt }, select: { id: true } });
     if (!archive) throw new CycleConflict('Kumbukumbu ya mzunguko haijathibitishwa.');
     await tx.group.update({ where: { id: groupId }, data: {
       cycleStartedAt: new Date(), cycleClosedAt: null, historicalMeetingStart: null, historicalMeetingWeekday: null,
+      ...(group.loanQueue ? { loanQueue: { ...(group.loanQueue as LoanQueue), previous: null } } : {}),
     } });
     await tx.loanApproval.deleteMany({ where: { loan: where } });
     await tx.loanAnnouncementAck.deleteMany({ where: { loan: where } });

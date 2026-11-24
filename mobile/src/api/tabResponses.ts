@@ -86,3 +86,9 @@ export const parseOffice = z.object({
   }),
   directory: z.array(member),
 }).parse;
+
+export const parseLoanQueue = z.object({
+  spun: z.boolean(), next: z.string().nullable(),
+  positions: z.array(z.object({ id: z.string(), name: z.string(), number: z.number() })),
+  swaps: z.array(z.object({ id: z.string(), from: z.string(), to: z.string(), fromName: z.string().optional(), toName: z.string().optional(), status: z.string() })),
+}).parse;

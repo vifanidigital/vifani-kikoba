@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
@@ -165,7 +166,7 @@ router.post('/approve-topup/:id', authenticateToken, async (req: AuthRequest, re
 
     const updated = await prisma.papoTopUp.updateMany({
       where: { id, groupId, status: 'PENDING', group: { members: { some: { userId: topUp.userId, isActive: true } } } },
-      data: { status: 'ACTIVE', dueDate },
+      data: { status: 'ACTIVE', dueDate, feedback: null },
     });
     if (updated.count === 0) {
       return res.status(409).json({ error: 'Ombi hili halisubiri idhini tena.' });
@@ -192,7 +193,7 @@ router.post('/request-repay-topup/:id', authenticateToken, async (req: AuthReque
 
     const requested = await prisma.papoTopUp.updateMany({
       where: { id, groupId, userId, status: { in: ['ACTIVE', 'OVERDUE'] } },
-      data: { status: 'REPAYMENT_PENDING' },
+      data: { status: 'REPAYMENT_PENDING', feedback: null },
     });
     if (!requested.count) return res.status(409).json({ error: 'Papo hii haiwezi kuombewa marejesho kwa sasa.' });
 
@@ -221,6 +222,7 @@ router.post('/confirm-repay-topup/:id', authenticateToken, async (req: AuthReque
         where: { id, groupId, status: 'REPAYMENT_PENDING', amountPaid: topUp.amountPaid },
         data: {
           status: 'PAID',
+          feedback: null,
           amountPaid: topUp.totalPayable,
         },
       });
@@ -244,6 +246,21 @@ router.post('/confirm-repay-topup/:id', authenticateToken, async (req: AuthReque
   } catch {
     res.status(500).json({ error: 'Imeshindikana kuthibitisha marejesho.' });
   }
+});
+
+router.post('/decline/:id/:stage', authenticateToken, async (req: AuthRequest, res) => {
+  const { groupId, role } = req.user!;
+  if (!LEADER_ROLES.includes(role)) return res.sendStatus(403);
+  const input = z.object({ stage: z.enum(['application', 'repayment']), reason: z.string().trim().min(3).max(300) })
+    .safeParse({ stage: req.params.stage, reason: req.body?.reason });
+  if (!input.success) return res.status(400).json({ error: 'Andika sababu ya kukataa.' });
+  const repayment = input.data.stage === 'repayment';
+  const result = await prisma.papoTopUp.updateMany({
+    where: { id: String(req.params.id), groupId, status: repayment ? 'REPAYMENT_PENDING' : 'PENDING' },
+    data: { status: repayment ? 'ACTIVE' : 'REJECTED', feedback: input.data.reason },
+  });
+  if (!result.count) return res.status(409).json({ error: 'Ombi hili halisubiri uamuzi.' });
+  res.json({ message: 'Ombi limekataliwa na sababu inaonekana kwa mwanachama.' });
 });
 
 export default router;
