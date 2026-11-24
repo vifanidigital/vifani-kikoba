@@ -104,13 +104,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!newToken || !newUser?.id || !activeGroup?.id || !activeRole || !Array.isArray(userMemberships)) {
       throw new Error('Majibu ya kuingia hayajakamilika.');
     }
-    await AsyncStorage.multiSet([
-      [SESSION_TOKEN_KEY, newToken],
-      ['vifani_user', JSON.stringify(newUser)],
-      ['vifani_group', JSON.stringify(activeGroup)],
-      ['vifani_role', activeRole],
-      ['vifani_memberships', JSON.stringify(userMemberships)],
-    ]);
+    try {
+      await AsyncStorage.multiSet([
+        [SESSION_TOKEN_KEY, newToken],
+        ['vifani_user', JSON.stringify(newUser)],
+        ['vifani_group', JSON.stringify(activeGroup)],
+        ['vifani_role', activeRole],
+        ['vifani_memberships', JSON.stringify(userMemberships)],
+      ]);
+    } catch {
+      throw new Error('Akaunti imethibitishwa, lakini simu imeshindwa kuhifadhi kipindi cha kuingia.');
+    }
 
     setToken(newToken);
     setUser(newUser);

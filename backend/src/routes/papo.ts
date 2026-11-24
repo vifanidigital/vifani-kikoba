@@ -164,7 +164,7 @@ router.post('/approve-topup/:id', authenticateToken, async (req: AuthRequest, re
     const dueDate = new Date(Date.now() + (group.topUpPapoWeeks || 4) * 7 * 24 * 60 * 60 * 1000);
 
     const updated = await prisma.papoTopUp.updateMany({
-      where: { id, groupId, status: 'PENDING' },
+      where: { id, groupId, status: 'PENDING', group: { members: { some: { userId: topUp.userId, isActive: true } } } },
       data: { status: 'ACTIVE', dueDate },
     });
     if (updated.count === 0) {

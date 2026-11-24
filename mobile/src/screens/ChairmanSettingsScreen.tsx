@@ -1,16 +1,15 @@
+import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  ScrollView,
-  TextInput,
+
   TouchableOpacity,
   Switch,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+  Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
@@ -179,8 +178,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
         fineLateTopUpPapo: Number(fineLateTopUp),
         fineLateBigLoan: Number(fineLateBigLoan),
         fineDiscipline: Number(fineDiscipline),
-        fineOther: Number(fineOther),
-      });
+        fineOther: Number(fineOther) });
       Alert.alert('Imefanikiwa', res.data?.message || 'Sheria zote zimehifadhiwa kikamilifu!');
       navigation.goBack();
     } catch (error: any) {
@@ -225,13 +223,13 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
         </View>
       </View>
 
-      <ScrollView className="flex-1 px-5 pt-4" showsVerticalScrollIndicator={false}>
+      <FormScrollView className="flex-1 px-5 pt-4" showsVerticalScrollIndicator={false}>
         {/* 1. UTAMBULISHO & RATIBA YA KIKUNDI */}
         <View className={`p-4 rounded-2xl mb-4 border ${cardClass}`}>
           <Text className="font-bold text-teal-600 text-base mb-3">1. Utambulisho & Ratiba ya Kikundi</Text>
 
           <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Jina la Kikundi / Kikoba</Text>
-          <TextInput
+          <FormTextInput
             className={`border rounded-xl p-3 mb-3 font-bold ${inputClass}`}
             value={groupName}
             onChangeText={setGroupName}
@@ -271,7 +269,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           <View className="flex-row gap-3 mb-3">
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Siku ya Kikao</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 value={meetingDay}
                 onChangeText={setMeetingDay}
@@ -281,7 +279,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
             </View>
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Muda wa Kikao</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 value={meetingTime}
                 onChangeText={setMeetingTime}
@@ -294,7 +292,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           <View className="flex-row gap-3 mb-3">
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Mzunguko wa Gawio (Miezi)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={cycleMonths}
@@ -303,7 +301,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
             </View>
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Ukomo wa Wanachama</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={maxMembers}
@@ -315,7 +313,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           <View className="flex-row gap-3">
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Ada ya Kiingilio (TZS)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={entryFee}
@@ -324,7 +322,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
             </View>
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Lipa Namba / Akaunti</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 value={paymentAccount}
                 onChangeText={setPaymentAccount}
@@ -339,7 +337,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
         <View className={`p-4 rounded-2xl mb-4 border ${cardClass}`}>
           <Text className="font-bold text-teal-600 text-base mb-3">2. Hisa & Mfuko wa Jamii</Text>
           <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Thamani ya Hisa Moja (TZS)</Text>
-          <TextInput
+          <FormTextInput
             className={`border rounded-xl p-3 mb-3 font-bold ${inputClass}`}
             keyboardType="numeric"
             value={shareValue}
@@ -349,7 +347,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           <View className="flex-row gap-3 mb-3">
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Kianzio cha Hisa (Idadi)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={minShares}
@@ -358,7 +356,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
             </View>
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Ukomo wa Hisa (Idadi)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={maxShares}
@@ -370,7 +368,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           <View className="flex-row gap-3">
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Jamii Kianzio (TZS)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={socialMin}
@@ -379,7 +377,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
             </View>
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Jamii Ukomo (TZS)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={socialMax}
@@ -397,7 +395,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           {hasPapo && (
             <>
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Kiasi cha Papo ya Lazima (TZS)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 mb-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={mandatoryPapo}
@@ -405,7 +403,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
               />
 
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Riba ya Papo Kila Kikao (% ya Jumla ya Papo)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 mb-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={papoInterest}
@@ -422,7 +420,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
                   <View className="flex-row gap-3 mb-3">
                     <View className="flex-1">
                       <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Kianzio Hiari (TZS)</Text>
-                      <TextInput
+                      <FormTextInput
                         className={`border rounded-xl p-3 font-bold ${inputClass}`}
                         keyboardType="numeric"
                         value={minTopUpCap}
@@ -431,7 +429,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
                     </View>
                     <View className="flex-1">
                       <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Ukomo Hiari (TZS)</Text>
-                      <TextInput
+                      <FormTextInput
                         className={`border rounded-xl p-3 font-bold ${inputClass}`}
                         keyboardType="numeric"
                         value={maxTopUpCap}
@@ -440,7 +438,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
                     </View>
                   </View>
                   <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Muda wa Kurejesha Papo ya Hiari (Majuma)</Text>
-                  <TextInput
+                  <FormTextInput
                     className={`border rounded-xl p-3 font-bold ${inputClass}`}
                     keyboardType="numeric"
                     value={topUpWeeks}
@@ -458,7 +456,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           <View className="flex-row gap-3 mb-3">
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Mara Ngapi ya Hisa</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={loanMultiplier}
@@ -467,7 +465,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
             </View>
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Riba ya Mkopo (%)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={interestRate}
@@ -477,7 +475,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           </View>
 
           <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Ukomo wa Juu wa Mkopo Mkubwa (TZS - Weka 0 kama hakuna)</Text>
-          <TextInput
+          <FormTextInput
             className={`border rounded-xl p-3 mb-3 font-bold ${inputClass}`}
             keyboardType="numeric"
             value={maxBigLoanCap}
@@ -487,7 +485,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           <View className="flex-row gap-3 mb-3">
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Muda wa Juu (Miezi)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={maxMonths}
@@ -496,7 +494,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
             </View>
             <View className="flex-1">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Siku za Neema (Grace)</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={gracePeriodDays}
@@ -513,7 +511,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           {requireGuarantor && (
             <View className="mb-3">
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Idadi ya Wadhamini Wanaohitajika</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={minGuarantorsCount}
@@ -555,7 +553,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
           ].map((item, idx) => (
             <View key={idx} className="flex-row justify-between items-center mb-2.5">
               <Text className={`text-xs font-semibold flex-1 ${textMain}`}>{item.label}</Text>
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl px-3 py-2 w-32 text-right font-bold ${inputClass}`}
                 keyboardType="numeric"
                 value={item.val}
@@ -577,7 +575,7 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
             <Text className="text-white font-bold text-base">Hifadhi Sheria Zote za Kikoba</Text>
           )}
         </TouchableOpacity>
-      </ScrollView>
+      </FormScrollView>
     </KeyboardAvoidingView>
   );
 }

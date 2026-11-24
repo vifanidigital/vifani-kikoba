@@ -80,6 +80,8 @@ model Group {
 
   subscriptionStatus String   @default("TRIAL")
   trialEndsAt        DateTime @default(now())
+  paidUntil          DateTime?
+  subscriptionPayments SubscriptionPayment[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -103,6 +105,8 @@ model GroupMember {
   user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   role                 String   @default("MEMBER")
   isActive             Boolean  @default(true)
+  suspendedAt          DateTime?
+  suspensionReason     String?
   memberInterestProfit Float    @default(0)
   joinedAt             DateTime @default(now())
 
@@ -268,4 +272,16 @@ model RuleChangeLog {
   changedBy   String
   summary     String
   createdAt   DateTime @default(now())
+}
+model SubscriptionPayment {
+  id          String @id @default(uuid())
+  groupId     String
+  group       Group @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  reference   String @unique
+  amount      Int
+  months      Int
+  paidUntil   DateTime
+  recordedAt  DateTime @default(now())
+
+  @@index([groupId, recordedAt])
 }

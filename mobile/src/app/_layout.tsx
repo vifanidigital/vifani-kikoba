@@ -1,4 +1,5 @@
 import '../../global.css';
+import { FormKeyboardProvider } from '../components/KeyboardForm';
 import { Stack } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -39,7 +40,9 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ThemeProvider>
         <AuthProvider>
-          <Routes />
+          <FormKeyboardProvider>
+            <Routes />
+          </FormKeyboardProvider>
         </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>

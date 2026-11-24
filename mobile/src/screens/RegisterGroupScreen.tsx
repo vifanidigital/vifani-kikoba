@@ -1,11 +1,11 @@
+import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { router } from 'expo-router';
 import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  TextInput,
+
   TouchableOpacity,
-  ScrollView,
   Switch,
   Alert,
   ActivityIndicator,
@@ -13,8 +13,7 @@ import {
   Platform,
   Animated,
   LayoutAnimation,
-  UIManager,
-} from 'react-native';
+  UIManager } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Application from 'expo-application';
 import { Ionicons } from '@expo/vector-icons';
@@ -158,8 +157,7 @@ export default function RegisterGroupScreen() {
         deviceId,
         chairperson: { fullName: chairName.trim(), phone: cleanChairPhone },
         secretary: secName.trim() && cleanSecPhone ? { fullName: secName.trim(), phone: cleanSecPhone } : undefined,
-        treasurer: treasName.trim() && cleanTreasPhone ? { fullName: treasName.trim(), phone: cleanTreasPhone } : undefined,
-      };
+        treasurer: treasName.trim() && cleanTreasPhone ? { fullName: treasName.trim(), phone: cleanTreasPhone } : undefined };
 
       const res = await apiClient.post('/auth/register-group', payload);
       const data = res.data;
@@ -180,7 +178,7 @@ export default function RegisterGroupScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       className="flex-1 bg-slate-950"
     >
-      <ScrollView
+      <FormScrollView
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 24, 40) }}
         contentContainerClassName="flex-grow"
         keyboardShouldPersistTaps="handled"
@@ -233,7 +231,7 @@ export default function RegisterGroupScreen() {
               <Text className="text-xs text-slate-500 mb-5">Chagua aina ya kikundi na muda wa mzunguko.</Text>
 
               <Text className="text-xs font-bold text-slate-700 mb-1.5 uppercase">Jina la Kikundi</Text>
-              <TextInput
+              <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 mb-4 text-slate-900 font-semibold"
                 placeholder="Mf. Umoja Women Group"
                 placeholderTextColor="#94a3b8"
@@ -267,7 +265,7 @@ export default function RegisterGroupScreen() {
               ))}
 
               <Text className="text-xs font-bold text-slate-700 mt-3 mb-1.5 uppercase">Muda wa Mzunguko (Miezi)</Text>
-              <TextInput
+              <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 mb-6 text-slate-900 font-bold"
                 keyboardType="numeric"
                 value={cycleMonths}
@@ -292,7 +290,7 @@ export default function RegisterGroupScreen() {
               <Text className="text-xs text-slate-500 mb-5">Weka viwango vya michango ya kawaida.</Text>
 
               <Text className="text-xs font-bold text-slate-700 mb-1.5 uppercase">Thamani ya Hisa / Mchango (TZS)</Text>
-              <TextInput
+              <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 mb-4 text-slate-900 font-bold"
                 keyboardType="numeric"
                 value={shareValue}
@@ -321,7 +319,7 @@ export default function RegisterGroupScreen() {
               </View>
 
               <Text className="text-xs font-bold text-slate-700 mb-1.5 uppercase">Mchango wa Mfuko wa Jamii (TZS)</Text>
-              <TextInput
+              <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 mb-4 text-slate-900 font-bold"
                 keyboardType="numeric"
                 value={socialFundAmount}
@@ -329,7 +327,7 @@ export default function RegisterGroupScreen() {
               />
 
               <Text className="text-xs font-bold text-slate-700 mb-1.5 uppercase">Faini ya Kuchelewa Kikao (TZS)</Text>
-              <TextInput
+              <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 mb-6 text-slate-900 font-bold"
                 keyboardType="numeric"
                 value={latePenalty}
@@ -353,7 +351,7 @@ export default function RegisterGroupScreen() {
               <Text className="text-xs text-slate-500 mb-4">Sanidi mikopo mikubwa na mfumo wa Papo.</Text>
 
               <Text className="text-xs font-bold text-slate-700 mb-1.5 uppercase">Riba ya Mkopo Mkubwa (%)</Text>
-              <TextInput
+              <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 mb-3 text-slate-900 font-bold"
                 keyboardType="numeric"
                 value={interestRate}
@@ -363,7 +361,7 @@ export default function RegisterGroupScreen() {
               <View className="flex-row gap-2 mb-4">
                 <View className="flex-1">
                   <Text className="text-[11px] font-bold text-slate-700 mb-1">Kiwango (Mara ya Hisa)</Text>
-                  <TextInput
+                  <FormTextInput
                     className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-900 font-bold"
                     keyboardType="numeric"
                     value={loanLimitMultiplier}
@@ -372,7 +370,7 @@ export default function RegisterGroupScreen() {
                 </View>
                 <View className="flex-1">
                   <Text className="text-[11px] font-bold text-slate-700 mb-1">Muda wa Mkopo (Miezi)</Text>
-                  <TextInput
+                  <FormTextInput
                     className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-900 font-bold"
                     keyboardType="numeric"
                     value={maxRepaymentMonths}
@@ -393,7 +391,7 @@ export default function RegisterGroupScreen() {
                 {hasPapo && (
                   <View>
                     <Text className="text-xs font-bold text-slate-700 mb-1">Kiasi cha Papo ya Lazima (TZS)</Text>
-                    <TextInput
+                    <FormTextInput
                       className="bg-white border border-slate-300 rounded-xl p-3 mb-3 font-bold text-slate-900"
                       keyboardType="numeric"
                       value={mandatoryPapoAmount}
@@ -401,7 +399,7 @@ export default function RegisterGroupScreen() {
                     />
 
                     <Text className="text-xs font-bold text-slate-700 mb-1">Riba ya Papo Kila Kikao (%)</Text>
-                    <TextInput
+                    <FormTextInput
                       className="bg-white border border-slate-300 rounded-xl p-3 mb-3 font-bold text-slate-900"
                       keyboardType="numeric"
                       value={papoMeetingInterest}
@@ -416,7 +414,7 @@ export default function RegisterGroupScreen() {
                     {allowTopUpPapo && (
                       <View>
                         <Text className="text-xs font-bold text-slate-700 mb-1">Riba ya Papo ya Hiari (%)</Text>
-                        <TextInput
+                        <FormTextInput
                           className="bg-white border border-slate-300 rounded-xl p-3 font-bold text-slate-900"
                           keyboardType="numeric"
                           value={topUpPapoInterest}
@@ -447,13 +445,13 @@ export default function RegisterGroupScreen() {
 
               <View className="bg-slate-50 p-4 rounded-2xl border-2 border-teal-600 mb-3">
                 <Text className="font-extrabold text-teal-800 text-xs uppercase mb-2">1. Mwenyekiti (Lazima)</Text>
-                <TextInput
+                <FormTextInput
                   className="bg-white border border-slate-200 rounded-xl p-3 mb-2 text-slate-900 font-semibold"
                   placeholder="Jina Kamili la Mwenyekiti"
                   value={chairName}
                   onChangeText={setChairName}
                 />
-                <TextInput
+                <FormTextInput
                   className="bg-white border border-slate-200 rounded-xl p-3 text-slate-900 font-semibold"
                   placeholder="Namba ya Simu (mf. 0712345678)"
                   keyboardType="numeric"
@@ -465,13 +463,13 @@ export default function RegisterGroupScreen() {
 
               <View className="bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-3">
                 <Text className="font-bold text-slate-700 text-xs uppercase mb-2">2. Katibu (Hiari)</Text>
-                <TextInput
+                <FormTextInput
                   className="bg-white border border-slate-200 rounded-xl p-3 mb-2 text-slate-900"
                   placeholder="Jina Kamili la Katibu (au acha wazi)"
                   value={secName}
                   onChangeText={setSecName}
                 />
-                <TextInput
+                <FormTextInput
                   className="bg-white border border-slate-200 rounded-xl p-3 text-slate-900"
                   placeholder="Namba ya Simu ya Katibu (au acha wazi)"
                   keyboardType="numeric"
@@ -483,13 +481,13 @@ export default function RegisterGroupScreen() {
 
               <View className="bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-3">
                 <Text className="font-bold text-slate-700 text-xs uppercase mb-2">3. Mweka Hazina (Hiari)</Text>
-                <TextInput
+                <FormTextInput
                   className="bg-white border border-slate-200 rounded-xl p-3 mb-2 text-slate-900"
                   placeholder="Jina Kamili la Mweka Hazina (au acha wazi)"
                   value={treasName}
                   onChangeText={setTreasName}
                 />
-                <TextInput
+                <FormTextInput
                   className="bg-white border border-slate-200 rounded-xl p-3 text-slate-900"
                   placeholder="Namba ya Simu ya Mweka Hazina (au acha wazi)"
                   keyboardType="numeric"
@@ -507,7 +505,7 @@ export default function RegisterGroupScreen() {
                   Epuka PIN rahisi kama 1234 au 0000. Tumia namba imara kama 2580.
                 </Text>
                 <View className="flex-row items-center bg-white border border-amber-300 rounded-xl px-3">
-                  <TextInput
+                  <FormTextInput
                     className="flex-1 py-3 text-base font-bold tracking-widest text-slate-900"
                     placeholder="Mf. 2580"
                     keyboardType="numeric"
@@ -557,7 +555,7 @@ export default function RegisterGroupScreen() {
             </View>
           )}
         </Animated.View>
-      </ScrollView>
+      </FormScrollView>
     </KeyboardAvoidingView>
   );
 }

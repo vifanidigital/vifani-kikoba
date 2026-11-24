@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { addMonths } from '../lib/subscription';
 import { z } from 'zod';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
 
@@ -11,6 +12,8 @@ const prisma = new PrismaClient();
 // Kusawazisha namba zote za Tanzania ziwe muundo mmoja (255XXXXXXXXX)
 export function normalizeTzPhone(raw: string): string {
   const cleaned = String(raw || '').replace(/[\s\-()]/g, '');
+  if (/^[67]\d{8}$/.test(cleaned)) return '255' + cleaned;
+  if (/^00255[67]\d{8}$/.test(cleaned)) return cleaned.slice(2);
   if (/^0[67]\d{8}$/.test(cleaned)) {
     return '255' + cleaned.slice(1);
   }
@@ -120,8 +123,7 @@ router.post('/register-group', async (req: Request, res: Response) => {
       }
     }
 
-    const trialEnds = new Date();
-    trialEnds.setDate(trialEnds.getDate() + 30);
+    const trialEnds = addMonths(new Date(), 1);
 
     const result = await prisma.$transaction(
       async (tx) => {
@@ -229,11 +231,18 @@ router.post('/register-group', async (req: Request, res: Response) => {
   }
 });
 
+// Keep sign-in independent of optional settings and recently added billing columns.
+const sessionGroupFields = {
+  id: true, name: true, shareValue: true, interestRate: true,
+  subscriptionStatus: true, trialEndsAt: true, contributionFreq: true,
+  socialFundAmount: true, latePenalty: true, hasPapo: true, mandatoryPapoAmount: true,
+} as const;
+
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const rawPhone = String(req.body.phone || '').trim();
     const pin = String(req.body.pin || '').trim();
-    const deviceId = String(req.body.deviceId || 'device-default-id');
+    if (!/^[0-9]{4,6}$/.test(pin)) return res.status(400).json({ error: 'PIN lazima iwe na tarakimu 4 hadi 6.' });
 
     let normalizedPhone = '';
     try {
@@ -243,29 +252,22 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     // Tafuta kwa muundo uliosawazishwa (2557...) au muundo wa zamani (07...) ikiwa upo
-    const local0Format = '0' + normalizedPhone.slice(3);
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [{ phone: normalizedPhone }, { phone: local0Format }],
-      },
+    const users = await prisma.user.findMany({
+      where: { phone: { in: [normalizedPhone, '0' + normalizedPhone.slice(3), '+' + normalizedPhone, normalizedPhone.slice(3), '00' + normalizedPhone] } },
+      select: { id: true, fullName: true, pinHash: true },
     });
-
-    if (!user) {
-      return res.status(404).json({
-        error: 'Namba hii ya simu haijasajiliwa. Tafadhali wasiliana na kiongozi wako akusajili au sajili kikundi kipya.',
-      });
+    const candidates = await Promise.all(users.map(async candidate => await bcrypt.compare(pin, candidate.pinHash) ? candidate : null));
+    const matches = candidates.filter(candidate => candidate !== null);
+    if (matches.length > 1) return res.status(409).json({ error: 'Namba hii ina akaunti zaidi ya moja. Wasiliana na msimamizi.' });
+    if (!matches.length) {
+      return res.status(401).json({ error: 'Namba au PIN si sahihi. Wasiliana na mwenyekiti kama umetumia taarifa ulizopewa.' });
     }
+    const user = matches[0];
 
-    const isPinValid = await bcrypt.compare(pin, user.pinHash);
-    if (!isPinValid) {
-      return res.status(401).json({
-        error: 'PIN uliyoingiza si sahihi. Tafadhali hakikisha tarakimu zako za siri na ujaribu tena.',
-      });
-    }
 
     const memberships = await prisma.groupMember.findMany({
       where: { userId: user.id, isActive: true },
-      include: { group: true },
+      select: { id: true, groupId: true, role: true, isActive: true, group: { select: sessionGroupFields } },
     });
 
     if (memberships.length === 0) {
@@ -274,15 +276,8 @@ router.post('/login', async (req: Request, res: Response) => {
       });
     }
 
-    // Sasisha namba iwe muundo mmoja wa kimataifa (255...) na uhifadhi deviceId
-    if (user.phone !== normalizedPhone || !user.deviceId) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { phone: normalizedPhone, deviceId: user.deviceId || deviceId, isVerified: true },
-      });
-    }
-
-    const primary = memberships[0];
+    const primary = memberships.find(entry => entry.group.subscriptionStatus === 'ACTIVE' ||
+      (entry.group.subscriptionStatus === 'TRIAL' && entry.group.trialEndsAt > new Date())) ?? memberships[0];
     const token = buildToken(user.id, primary.groupId, primary.role);
 
     res.json({
@@ -292,8 +287,14 @@ router.post('/login', async (req: Request, res: Response) => {
       memberships,
       user: { id: user.id, fullName: user.fullName, phone: normalizedPhone },
     });
-  } catch {
-    res.status(500).json({ error: 'Hitilafu imetokea wakati wa kuingia.' });
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined;
+    const schema = code === 'P2022' || code === 'P2021';
+    const diagnostic = schema ? 'LOGIN_SCHEMA' : 'LOGIN_SERVICE';
+    console.error('[auth/login]', diagnostic, code ?? 'unknown');
+    res.status(503).json({ error: schema
+      ? 'Seva inahitaji kusasisha muundo wa hifadhidata.'
+      : 'Huduma ya kuingia haipatikani kwa sasa. Jaribu tena baadaye.', code: diagnostic });
   }
 });
 

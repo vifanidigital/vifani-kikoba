@@ -1,9 +1,10 @@
+import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { router } from 'expo-router';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
-  TextInput,
+
   TouchableOpacity,
   Alert,
   ActivityIndicator,
@@ -14,14 +15,14 @@ import {
   Platform,
   Animated,
   LayoutAnimation,
-  UIManager,
-} from 'react-native';
+  UIManager } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Application from 'expo-application';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, FontAwesome5, FontAwesome6 } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
+import { isAxiosError } from 'axios';
 import { useAuth } from '../context/AuthContext';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -86,7 +87,7 @@ export default function LoginScreen() {
   const handleOtpChange = (text: string) => setOtp(onlyDigits(text));
   const handleNewPinChange = (text: string) => setNewPin(onlyDigits(text));
 
-  const isValidTzPhone = (p: string) => /^(0[67]\d{8}|255[67]\d{8})$/.test(p);
+  const isValidTzPhone = (p: string) => /^((00)?255[67]\d{8}|[67]\d{8}|0[67]\d{8})$/.test(p);
   const isValidPin = (p: string) => /^\d{4,6}$/.test(p);
   const isLoginReady = isValidTzPhone(phone) && isValidPin(pin) && !loading;
   const getDeviceId = async () => {
@@ -98,17 +99,22 @@ export default function LoginScreen() {
   };
 
   const handleBiometricLogin = async () => {
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Thibitisha kwa Alama ya Kidole au Uso',
-      fallbackLabel: 'Tumia PIN',
-    });
-
-    if (result.success) {
-      const savedCreds = await AsyncStorage.getItem('vifani_bio_creds');
-      if (savedCreds) {
-        const { savedPhone, savedPin } = JSON.parse(savedCreds);
-        await executeLogin(savedPhone, savedPin);
+    try {
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Thibitisha kwa Alama ya Kidole au Uso',
+        fallbackLabel: 'Tumia PIN',
+      });
+      if (!result.success) return;
+      const saved = await AsyncStorage.getItem('vifani_bio_creds');
+      const credentials = saved ? JSON.parse(saved) : null;
+      if (typeof credentials?.savedPhone !== 'string' || typeof credentials?.savedPin !== 'string') {
+        setHasSavedBiometrics(false);
+        Alert.alert('Tumia PIN', 'Ingiza namba ya simu na PIN yako.');
+        return;
       }
+      await executeLogin(credentials.savedPhone, credentials.savedPin);
+    } catch {
+      Alert.alert('Tumia PIN', 'Alama ya kidole haikuweza kuthibitishwa. Ingiza PIN yako.');
     }
   };
 
@@ -127,14 +133,14 @@ export default function LoginScreen() {
       return Alert.alert('PIN Si Sahihi', 'PIN lazima iwe tarakimu 4 hadi 6 pekee.');
     }
 
+    Keyboard.dismiss();
     setLoading(true);
     try {
       const deviceId = await getDeviceId();
       const res = await apiClient.post('/auth/login', {
         phone: cleanPhone,
         pin: cleanPin,
-        deviceId,
-      });
+        deviceId });
 
       setServerReady('ONLINE');
       const data = res.data;
@@ -145,14 +151,22 @@ export default function LoginScreen() {
         return;
       }
 
-      await AsyncStorage.setItem('vifani_bio_creds', JSON.stringify({ savedPhone: cleanPhone, savedPin: cleanPin }));
-      await signIn(data.token, data.user, data.activeGroup, data.activeRole, data.memberships, true);
-    } catch (error: any) {
-      const serverMsg = error.response?.data?.error;
-      Alert.alert(
-        'Imeshindikana Kuingia',
-        serverMsg || 'Namba ya simu au PIN si sahihi, au mtandao unasumbua. Jaribu tena.'
-      );
+      await signIn(data?.token, data?.user, data?.activeGroup, data?.activeRole, data?.memberships, true);
+      void AsyncStorage.setItem('vifani_bio_creds', JSON.stringify({ savedPhone: cleanPhone, savedPin: cleanPin })).catch(() => {});
+    } catch (error) {
+      let message = 'Majibu ya kuingia hayakuweza kutumika kwenye simu hii.';
+      if (isAxiosError(error)) {
+        const detail = error.response?.data?.error;
+        const code = error.response?.data?.code;
+        if (typeof detail === 'string') message = detail;
+        else if (!error.response) message = 'Simu imeshindwa kuwasiliana na seva. Hakiki mtandao kisha ujaribu tena.';
+        else message = 'Seva imeshindwa kushughulikia ombi la kuingia.';
+        if (typeof code === 'string' && /^[A-Z0-9_]{1,35}$/.test(code)) message += ' (' + code + ')';
+        else if (error.response && error.response.status >= 500) message += ' (HTTP ' + error.response.status + ')';
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+      Alert.alert('Imeshindikana Kuingia', message);
     } finally {
       setLoading(false);
     }
@@ -226,7 +240,7 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       className="flex-1 bg-slate-950"
     >
-      <ScrollView
+      <FormScrollView
         ref={loginScroll}
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 24, 40) }}
         contentContainerClassName="flex-grow"
@@ -278,12 +292,12 @@ export default function LoginScreen() {
               </Text>
               <View className="flex-row items-center bg-slate-50 border border-slate-200 rounded-2xl px-3.5 mb-4">
                 <Ionicons name="call-outline" size={20} color="#0f766e" />
-                <TextInput
+                <FormTextInput
                   className="flex-1 py-3.5 px-3 text-base font-semibold text-slate-900"
                   placeholder="Mf. 0712345678"
                   placeholderTextColor="#94a3b8"
                   keyboardType="numeric"
-                  maxLength={12}
+                  maxLength={14}
                   value={phone}
                   onChangeText={handlePhoneChange}
                 />
@@ -299,7 +313,7 @@ export default function LoginScreen() {
               </Text>
               <View className="flex-row items-center bg-slate-50 border border-slate-200 rounded-2xl px-3.5 mb-2.5">
                 <Ionicons name="lock-closed-outline" size={20} color="#0f766e" />
-                <TextInput
+                <FormTextInput
                   className="flex-1 py-3.5 px-3 text-base font-bold text-slate-900 tracking-widest"
                   placeholder="••••"
                   placeholderTextColor="#94a3b8"
@@ -372,7 +386,7 @@ export default function LoginScreen() {
               <Text className="text-xs text-slate-500 mb-4">
                 Ingiza kodi ya OTP yenye tarakimu 6 iliyotumwa kwenda {phone}
               </Text>
-              <TextInput
+              <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-center text-xl font-bold tracking-widest text-slate-900"
                 placeholder="000000"
                 keyboardType="numeric"
@@ -399,11 +413,11 @@ export default function LoginScreen() {
               <Text className="text-xs text-slate-500 mb-4">
                 Weka namba yako ya simu iliyosajiliwa kupokea kodi ya kubadili PIN
               </Text>
-              <TextInput
+              <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-base font-semibold text-slate-900"
                 placeholder="Mf. 0712345678"
                 keyboardType="numeric"
-                maxLength={12}
+                maxLength={14}
                 value={phone}
                 onChangeText={handlePhoneChange}
               />
@@ -427,7 +441,7 @@ export default function LoginScreen() {
                 Ingiza kodi ya OTP na PIN yako mpya ya siri
               </Text>
               <Text className="text-xs font-bold text-slate-700 mb-1.5">Kodi ya OTP (Tarakimu 6)</Text>
-              <TextInput
+              <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-base font-bold text-slate-900 tracking-widest"
                 placeholder="000000"
                 keyboardType="numeric"
@@ -439,7 +453,7 @@ export default function LoginScreen() {
               <Text className="text-xs font-bold text-slate-700 mb-1.5">PIN Mpya (Tarakimu 4 hadi 6)</Text>
               <View className="flex-row items-center bg-slate-50 border border-slate-200 rounded-2xl px-3.5 mb-5">
                 <Ionicons name="lock-closed-outline" size={20} color="#0f766e" />
-                <TextInput
+                <FormTextInput
                   className="flex-1 py-3.5 px-3 text-base font-bold text-slate-900 tracking-widest"
                   placeholder="Weka PIN mpya"
                   keyboardType="numeric"
@@ -549,7 +563,7 @@ export default function LoginScreen() {
             </View>
           )}
         </View>
-      </ScrollView>
+      </FormScrollView>
     </KeyboardAvoidingView>
   );
 }

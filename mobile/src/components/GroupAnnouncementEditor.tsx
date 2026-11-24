@@ -1,5 +1,6 @@
+import { FormTextInput } from './KeyboardForm';
 import { useState } from 'react';
-import { Alert, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Text, TouchableOpacity, View } from 'react-native';
 import { isAxiosError } from 'axios';
 import { apiClient } from '../api/client';
 import { useTheme } from '../context/ThemeContext';
@@ -8,6 +9,7 @@ type AnnouncementFields = {
   announcement?: string | null;
   announcementPublishedAt?: string | null;
   announcementExpiresAt?: string | null;
+  announcementUpdatedAt?: string | null;
 };
 
 export default function GroupAnnouncementEditor({ group, reload }: {
@@ -15,6 +17,8 @@ export default function GroupAnnouncementEditor({ group, reload }: {
   reload: () => Promise<void>;
 }) {
   const { isDark } = useTheme();
+  const [recent, setRecent] = useState<AnnouncementFields | null>(null);
+  const current = recent && (!group.announcementUpdatedAt || (recent.announcementUpdatedAt ?? '') >= group.announcementUpdatedAt) ? recent : group;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [hours, setHours] = useState('');
@@ -22,10 +26,10 @@ export default function GroupAnnouncementEditor({ group, reload }: {
   const [error, setError] = useState('');
   const textColor = isDark ? 'text-white' : 'text-slate-900';
   const detailColor = isDark ? 'text-slate-300' : 'text-slate-600';
-  const expires = group.announcementExpiresAt;
+  const expires = current.announcementExpiresAt;
 
   const open = () => {
-    setDraft(group.announcement ?? '');
+    setDraft(current.announcement ?? '');
     setHours(expires && new Date(expires).getTime() > Date.now() ? '' : '24');
     setError('');
     setEditing(true);
@@ -42,16 +46,15 @@ export default function GroupAnnouncementEditor({ group, reload }: {
     setSaving(true);
     setError('');
     try {
-      if (remove) {
-        await apiClient.delete('/group/announcement');
-      } else {
-        await apiClient.put('/group/announcement', { text: draft.trim(), durationHours });
-      }
+      const response = remove
+        ? await apiClient.delete('/group/announcement')
+        : await apiClient.put('/group/announcement', { text: draft.trim(), durationHours });
+      if (response.data?.announcement) setRecent(response.data.announcement);
       await reload();
       setEditing(false);
     } catch (cause) {
       const message = isAxiosError(cause) ? cause.response?.data?.error : null;
-      setError(typeof message === 'string' ? message : 'Imeshindikana kusasisha tangazo. Jaribu tena.');
+      setError(typeof message === 'string' ? message : isAxiosError(cause) && cause.response?.status === 404 ? 'Seva hii bado haina huduma ya kuhariri matangazo.' : 'Imeshindikana kusasisha tangazo. Jaribu tena.');
     } finally {
       setSaving(false);
     }
@@ -60,11 +63,11 @@ export default function GroupAnnouncementEditor({ group, reload }: {
   return (
     <View className={'mb-4 rounded-2xl p-4 ' + (isDark ? 'bg-slate-900' : 'bg-white')}>
       <Text className={'text-base font-bold ' + textColor}>Tangazo la Kikundi</Text>
-      {group.announcement ? (
+      {current.announcement ? (
         <>
-          <Text className={'mt-2 ' + textColor}>{group.announcement}</Text>
+          <Text className={'mt-2 ' + textColor}>{current.announcement}</Text>
           <Text className={'mt-2 text-xs ' + detailColor}>
-            {group.announcementPublishedAt ? 'Lilichapishwa ' + new Date(group.announcementPublishedAt).toLocaleString('sw-TZ') : 'Tangazo la awali'}
+            {current.announcementPublishedAt ? 'Lilichapishwa ' + new Date(current.announcementPublishedAt).toLocaleString('sw-TZ') : 'Tangazo la awali'}
           </Text>
           <Text className={'mt-1 text-xs ' + detailColor}>
             {expires ? 'Mwisho wa kuonekana ' + new Date(expires).toLocaleString('sw-TZ') : 'Muda wa mwisho haujawekwa'}
@@ -74,7 +77,7 @@ export default function GroupAnnouncementEditor({ group, reload }: {
       {editing ? (
         <>
           <Text className={'mb-1 mt-3 font-bold ' + textColor}>Ujumbe</Text>
-          <TextInput
+          <FormTextInput
             accessibilityLabel="Ujumbe wa tangazo"
             multiline
             maxLength={1000}
@@ -84,7 +87,7 @@ export default function GroupAnnouncementEditor({ group, reload }: {
             className={'min-h-24 rounded-xl border border-slate-400 p-3 ' + textColor}
           />
           <Text className={'mb-1 mt-3 font-bold ' + textColor}>Muda wa kuonekana kwa saa</Text>
-          <TextInput
+          <FormTextInput
             accessibilityLabel="Muda wa kuonekana kwa saa"
             keyboardType="number-pad"
             editable={!saving}
@@ -101,13 +104,13 @@ export default function GroupAnnouncementEditor({ group, reload }: {
       {error ? <Text accessibilityRole="alert" className="mt-2 text-red-600">{error}</Text> : null}
       <View className="mt-3 flex-row flex-wrap gap-2">
         <TouchableOpacity disabled={saving} onPress={editing ? () => void submit(false) : open} className="rounded-xl bg-teal-700 px-4 py-3">
-          <Text className="font-bold text-white">{saving ? 'Inahifadhi…' : editing ? 'Hifadhi tangazo' : group.announcement ? 'Hariri tangazo' : 'Weka tangazo'}</Text>
+          <Text className="font-bold text-white">{saving ? 'Inahifadhi…' : editing ? 'Hifadhi tangazo' : current.announcement ? 'Hariri tangazo' : 'Weka tangazo'}</Text>
         </TouchableOpacity>
         {editing ? (
           <TouchableOpacity disabled={saving} onPress={() => { setError(''); setEditing(false); }} className="px-3 py-3">
             <Text className={textColor}>Ghairi</Text>
           </TouchableOpacity>
-        ) : group.announcement ? (
+        ) : current.announcement ? (
           <TouchableOpacity
             disabled={saving}
             onPress={() => Alert.alert('Futa tangazo?', 'Wanachama hawataliona tena.', [

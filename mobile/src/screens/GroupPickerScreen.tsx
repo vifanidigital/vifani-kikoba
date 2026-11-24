@@ -1,14 +1,13 @@
+import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  ScrollView,
   ActivityIndicator,
   Alert,
-  TextInput,
-  Animated,
-} from 'react-native';
+
+  Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -88,10 +87,17 @@ export default function GroupPickerScreen() {
           </TouchableOpacity>
         </View>
 
+      </View>
+
+      <FormScrollView
+        className="flex-1 px-5 pt-5"
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 24, 40) }}
+        showsVerticalScrollIndicator={false}
+      >
         {safeMemberships.length > 3 && (
-          <View className="flex-row items-center bg-teal-800/80 rounded-xl px-3.5 py-2.5 mt-4 border border-teal-600/50">
+          <View className="flex-row items-center bg-teal-800/80 rounded-xl px-3.5 py-2.5 mb-4 border border-teal-600/50">
             <Ionicons name="search-outline" size={18} color="#99f6e4" />
-            <TextInput
+            <FormTextInput
               className="flex-1 ml-2 text-white text-xs font-semibold"
               placeholder="Tafuta jina la kikundi..."
               placeholderTextColor="#99f6e4"
@@ -105,13 +111,6 @@ export default function GroupPickerScreen() {
             )}
           </View>
         )}
-      </View>
-
-      <ScrollView
-        className="flex-1 px-5 pt-5"
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 24, 40) }}
-        showsVerticalScrollIndicator={false}
-      >
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
           {filteredGroups.length === 0 ? (
             <View className={`p-8 rounded-2xl border items-center mt-4 ${cardClass}`}>
@@ -168,7 +167,7 @@ export default function GroupPickerScreen() {
             })
           )}
         </Animated.View>
-      </ScrollView>
+      </FormScrollView>
     </View>
   );
 }

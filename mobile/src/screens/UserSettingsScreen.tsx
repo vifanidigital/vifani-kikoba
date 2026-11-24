@@ -1,12 +1,12 @@
+import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { useUserPreference } from '../utils/useUserPreference';
 import { router } from 'expo-router';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
-  TextInput,
+
   Switch,
   Alert,
   ActivityIndicator,
@@ -14,8 +14,7 @@ import {
   Platform,
   Share,
   Linking,
-  Animated,
-} from 'react-native';
+  Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -92,8 +91,7 @@ export default function UserSettingsScreen() {
 
     const authResult = await LocalAuthentication.authenticateAsync({
       promptMessage: 'Thibitisha kuwasha kufuli ya alama ya kidole',
-      fallbackLabel: 'Ghairi',
-    });
+      fallbackLabel: 'Ghairi' });
 
     if (authResult.success) {
       setBiometricEnabled(true);
@@ -181,8 +179,7 @@ export default function UserSettingsScreen() {
   const handleInviteMembers = async () => {
     try {
       await Share.share({
-        message: `Karibu kwenye kikundi chetu cha *${group?.name || 'Vifani Jamii'}*! Pakua app ya Vifani Jamii ufuatilie hisa, mikopo na mgawo wako kwa uwazi.`,
-      });
+        message: `Karibu kwenye kikundi chetu cha *${group?.name || 'Vifani Jamii'}*! Pakua app ya Vifani Jamii ufuatilie hisa, mikopo na mgawo wako kwa uwazi.` });
     } catch {
       // User cancelled share
     }
@@ -247,7 +244,7 @@ export default function UserSettingsScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <FormScrollView
         className="flex-1 px-5 pt-4"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -299,7 +296,7 @@ export default function UserSettingsScreen() {
             <Text className="text-xs font-extrabold text-teal-600 uppercase mb-3">Taarifa Zangu</Text>
 
             <Text className={`text-xs font-bold mb-1 ${textMain}`}>Jina Kamili</Text>
-            <TextInput
+            <FormTextInput
               className={`border rounded-xl p-3 mb-3 text-sm font-semibold ${inputClass}`}
               value={fullName}
               onChangeText={setFullName}
@@ -341,7 +338,7 @@ export default function UserSettingsScreen() {
 
             <Text className={`text-xs font-bold mb-1 ${textMain}`}>PIN ya Zamani</Text>
             <View className={`flex-row items-center border rounded-xl px-3 mb-2.5 ${inputClass}`}>
-              <TextInput
+              <FormTextInput
                 className={`flex-1 py-3 text-sm font-bold tracking-widest ${isDark ? 'text-white' : 'text-slate-900'}`}
                 keyboardType="numeric"
                 secureTextEntry={!showOldPin}
@@ -358,7 +355,7 @@ export default function UserSettingsScreen() {
 
             <Text className={`text-xs font-bold mb-1 ${textMain}`}>PIN Mpya (Tarakimu 4-6)</Text>
             <View className={`flex-row items-center border rounded-xl px-3 mb-2.5 ${inputClass}`}>
-              <TextInput
+              <FormTextInput
                 className={`flex-1 py-3 text-sm font-bold tracking-widest ${isDark ? 'text-white' : 'text-slate-900'}`}
                 keyboardType="numeric"
                 secureTextEntry={!showNewPin}
@@ -375,7 +372,7 @@ export default function UserSettingsScreen() {
 
             <Text className={`text-xs font-bold mb-1 ${textMain}`}>Thibitisha PIN Mpya</Text>
             <View className={`flex-row items-center border rounded-xl px-3 mb-3.5 ${inputClass}`}>
-              <TextInput
+              <FormTextInput
                 className={`flex-1 py-3 text-sm font-bold tracking-widest ${isDark ? 'text-white' : 'text-slate-900'}`}
                 keyboardType="numeric"
                 secureTextEntry={!showConfirmPin}
@@ -470,7 +467,7 @@ export default function UserSettingsScreen() {
             Vifani Jamii • Toleo la 1.0.0
           </Text>
         </Animated.View>
-      </ScrollView>
+      </FormScrollView>
     </KeyboardAvoidingView>
   );
 }

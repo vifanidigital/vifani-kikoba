@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
+import adminRoutes from './routes/admin';
 import groupRoutes from './routes/group';
 import memberRoutes from './routes/members';
 import shareRoutes from './routes/shares';
@@ -20,6 +21,7 @@ app.get('/', (req, res) => {
   res.send('Vifani Kikoba SaaS API inafanya kazi kikamilifu!');
 });
 
+app.use('/admin', adminRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/group', groupRoutes);
 app.use('/api/members', memberRoutes);

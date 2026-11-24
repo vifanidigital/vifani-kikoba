@@ -1,3 +1,5 @@
+import { subscriptionAccess } from '../lib/subscription';
+import { interestTiming } from '../lib/loanInterest';
 import { Router, Response } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -40,7 +42,7 @@ router.get('/settings', authenticateToken, async (req: AuthRequest, res: Respons
     const [group, members] = await Promise.all([
       prisma.group.findUnique({ where: { id: groupId } }),
       prisma.groupMember.findMany({
-        where: { groupId, isActive: true },
+        where: { groupId },
         include: {
           user: { select: { id: true, fullName: true, phone: true } },
         },
@@ -57,6 +59,9 @@ router.get('/settings', authenticateToken, async (req: AuthRequest, res: Respons
       fullName: m.user.fullName,
       phone: formatLocalPhone(m.user.phone),
       role: m.role,
+      isActive: m.isActive,
+      suspendedAt: m.suspendedAt,
+      suspensionReason: isLeader ? m.suspensionReason : null,
       joinedAt: m.joinedAt,
     }));
 
@@ -65,6 +70,8 @@ router.get('/settings', authenticateToken, async (req: AuthRequest, res: Respons
         ? { ...group, announcement: null }
         : group,
       isLeader,
+      viewerRole: role,
+      subscriptionAccess: subscriptionAccess(group),
       directory,
     });
   } catch {
@@ -82,7 +89,7 @@ router.get('/member-audit/:targetUserId', authenticateToken, async (req: AuthReq
 
     const targetUserId = String(req.params.targetUserId);
 
-    const [sharesAgg, papoAcc, activeLoans, activeTopUps, unpaidFinesAgg, memberInfo] = await Promise.all([
+    const [sharesAgg, papoAcc, activeLoans, activeTopUps, unpaidFinesAgg, memberInfo, interestLedger, allTopUps] = await Promise.all([
       prisma.shareRecord.aggregate({
         where: { groupId, userId: targetUserId },
         _sum: { sharesCount: true, amountPaid: true, socialFundPaid: true },
@@ -103,10 +110,18 @@ router.get('/member-audit/:targetUserId', authenticateToken, async (req: AuthReq
       prisma.groupMember.findUnique({
         where: { userId_groupId: { userId: targetUserId, groupId } },
       }),
+      prisma.transaction.findMany({ where: { groupId, userId: targetUserId, type: { in: ['LOAN_INTEREST_REPAYMENT', 'PAPO_INTEREST'] } } }),
+      prisma.papoTopUp.findMany({ where: { groupId, userId: targetUserId } }),
     ]);
 
+    if (!memberInfo) return res.status(404).json({ error: 'Mwanachama hajapatikana kwenye kikundi hiki.' });
     const loanDebt = activeLoans.reduce((s, l) => s + Math.max(0, l.totalRepayable - l.amountPaid), 0);
-    const papoTopUpDebt = activeTopUps.reduce((s, t) => s + t.principalAmount, 0);
+    const papoTopUpDebt = activeTopUps.reduce((sum, topUp) => sum + Math.max(0, topUp.totalPayable - topUp.amountPaid), 0);
+    const onTime = interestLedger.filter(row => row.type === 'LOAN_INTEREST_REPAYMENT' && interestTiming(row) === 'ON_TIME').reduce((sum, row) => sum + row.amount, 0);
+    const periodicPapo = interestLedger.filter(row => row.type === 'PAPO_INTEREST').reduce((sum, row) => sum + row.amount, 0);
+    const topUpInterest = allTopUps.reduce((sum, row) => sum + Math.max(0, Math.min(row.amountPaid, row.totalPayable - row.principalAmount)), 0);
+    const personalClaims = (sharesAgg._sum.amountPaid ?? 0) + (sharesAgg._sum.socialFundPaid ?? 0) + (papoAcc?.mandatoryBalance ?? 0) + onTime + Math.floor((periodicPapo + topUpInterest) * 50) / 100;
+    const totalDebt = loanDebt + papoTopUpDebt + (unpaidFinesAgg._sum.amount ?? 0);
 
     res.json({
       sharesCount: sharesAgg._sum.sharesCount || 0,
@@ -116,7 +131,10 @@ router.get('/member-audit/:targetUserId', authenticateToken, async (req: AuthReq
       loanDebt,
       papoTopUpDebt,
       unpaidFines: unpaidFinesAgg._sum.amount || 0,
-      interestProfit: memberInfo?.memberInterestProfit || 0,
+      interestProfit: onTime,
+      personalClaims,
+      totalDebt,
+      netPersonalClaims: personalClaims - totalDebt,
     });
   } catch {
     res.status(500).json({ error: 'Imeshindikana kuvuta taarifa za mwanachama.' });
@@ -225,17 +243,17 @@ router.put('/announcement', authenticateToken, async (req: AuthRequest, res: Res
     if (durationHours === undefined && (!active || !expiresAt)) {
       return res.status(400).json({ error: 'Chagua muda wa tangazo kuonekana.' });
     }
+    const announcement = {
+      announcement: text,
+      announcementPublishedAt: (active ? current.announcementPublishedAt : null) ?? now,
+      announcementExpiresAt: expiresAt,
+      announcementUpdatedAt: new Date(Math.max(now.getTime(), (current.announcementUpdatedAt?.getTime() ?? 0) + 1)),
+    };
     const changed = await prisma.group.updateMany({
-      where: { id: groupId, announcementUpdatedAt: current.announcementUpdatedAt },
-      data: {
-        announcement: text,
-        announcementPublishedAt: (active ? current.announcementPublishedAt : null) ?? now,
-        announcementExpiresAt: expiresAt,
-        announcementUpdatedAt: new Date(Math.max(now.getTime(), (current.announcementUpdatedAt?.getTime() ?? 0) + 1)),
-      },
+      where: { id: groupId, announcementUpdatedAt: current.announcementUpdatedAt }, data: announcement,
     });
     if (!changed.count) return res.status(409).json({ error: 'Tangazo limebadilika. Pakia tena kisha ujaribu.' });
-    res.json({ message: 'Tangazo limehifadhiwa.' });
+    res.json({ message: 'Tangazo limehifadhiwa.', announcement });
   } catch {
     res.status(500).json({ error: 'Imeshindikana kuhifadhi tangazo.' });
   }
@@ -247,16 +265,12 @@ router.delete('/announcement', authenticateToken, async (req: AuthRequest, res: 
     if (!await canManageAnnouncement(groupId, userId)) {
       return res.status(403).json({ error: 'Mwenyekiti pekee ndiye anayeweza kufuta tangazo.' });
     }
-    await prisma.group.update({
+    const group = await prisma.group.update({
       where: { id: groupId },
-      data: {
-        announcement: null,
-        announcementPublishedAt: null,
-        announcementExpiresAt: null,
-        announcementUpdatedAt: new Date(),
-      },
+      data: { announcement: null, announcementPublishedAt: null, announcementExpiresAt: null, announcementUpdatedAt: new Date() },
+      select: { announcement: true, announcementPublishedAt: true, announcementExpiresAt: true, announcementUpdatedAt: true },
     });
-    res.json({ message: 'Tangazo limefutwa.' });
+    res.json({ message: 'Tangazo limefutwa.', announcement: group });
   } catch {
     res.status(500).json({ error: 'Imeshindikana kufuta tangazo.' });
   }

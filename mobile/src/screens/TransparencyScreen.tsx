@@ -1,18 +1,17 @@
+import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
-  TextInput,
+
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Share,
-  RefreshControl,
-} from 'react-native';
+  RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
@@ -61,8 +60,7 @@ export default function TransparencyScreen() {
         category: expCategory,
         title: expTitle.trim(),
         beneficiary: expBeneficiary.trim(),
-        amount: amt,
-      });
+        amount: amt });
       Alert.alert('Imefanikiwa', res.data?.message);
       setShowExpenseModal(false);
       setExpTitle('');
@@ -146,7 +144,7 @@ export default function TransparencyScreen() {
         <TopTabs selected={activeTab} onSelect={setActiveTab} tabs={[{ id: 'SHAREOUT', label: 'Mgawo Wangu' }, { id: 'EXPENSES', label: 'Matumizi' }, { id: 'KATIBA', label: 'Historia ya Katiba' }]} />
       </View>
 
-      <ScrollView
+      <FormScrollView
         keyboardShouldPersistTaps="handled"
         className="flex-1 px-5 pt-4"
         showsVerticalScrollIndicator={false}
@@ -324,7 +322,7 @@ export default function TransparencyScreen() {
           <View className="h-10" />
           </>}
         </View>
-      </ScrollView>
+      </FormScrollView>
 
       {showExpenseModal && (
         <View
@@ -336,8 +334,7 @@ export default function TransparencyScreen() {
             bottom: 0,
             backgroundColor: 'rgba(0,0,0,0.55)',
             justifyContent: 'flex-end',
-            zIndex: 999,
-          }}
+            zIndex: 999 }}
         >
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -347,10 +344,9 @@ export default function TransparencyScreen() {
               borderTopLeftRadius: 24,
               borderTopRightRadius: 24,
               padding: 24,
-              paddingBottom: Math.max(insets.bottom + 16, 24),
-            }}
+              paddingBottom: Math.max(insets.bottom + 16, 24) }}
           >
-            <ScrollView keyboardShouldPersistTaps="handled">
+            <FormScrollView keyboardShouldPersistTaps="handled">
             <View className="flex-row justify-between items-center mb-4">
               <Text className="text-lg font-bold text-slate-900">Rekodi Matumizi ya Kikundi</Text>
               <TouchableOpacity onPress={() => setShowExpenseModal(false)}>
@@ -377,19 +373,19 @@ export default function TransparencyScreen() {
               ))}
             </View>
 
-            <TextInput
+            <FormTextInput
               className="bg-slate-50 border border-slate-300 rounded-xl p-3 mb-2.5 text-slate-900"
               placeholder="Sababu (mf. Msaada wa msiba / Shajala)"
               value={expTitle}
               onChangeText={setExpTitle}
             />
-            <TextInput
+            <FormTextInput
               className="bg-slate-50 border border-slate-300 rounded-xl p-3 mb-2.5 text-slate-900"
               placeholder="Jina la aliyepokea pesa (Hiari)"
               value={expBeneficiary}
               onChangeText={setExpBeneficiary}
             />
-            <TextInput
+            <FormTextInput
               className="bg-slate-50 border border-slate-300 rounded-xl p-3 mb-4 text-slate-900 font-bold"
               placeholder="Kiasi kilichotoka (TZS)"
               keyboardType="numeric"
@@ -404,7 +400,7 @@ export default function TransparencyScreen() {
             >
               {savingExpense ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Hifadhi Kwenye Daftari</Text>}
             </TouchableOpacity>
-            </ScrollView>
+            </FormScrollView>
           </KeyboardAvoidingView>
         </View>
       )}

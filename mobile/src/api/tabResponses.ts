@@ -8,6 +8,9 @@ const member = z.looseObject({
   phone: z.string().nullish(),
   role: z.string(),
   joinedAt: z.string(),
+  isActive: z.boolean().default(true),
+  suspendedAt: z.string().nullish(),
+  suspensionReason: z.string().nullish(),
 });
 
 export const parsePapo = z.looseObject({
@@ -67,6 +70,8 @@ export const parseAuditLogs = z.object({
 }).parse;
 
 export const parseOffice = z.object({
+  viewerRole: z.string().optional(),
+  subscriptionAccess: z.enum(['TRIAL', 'ACTIVE', 'EXPIRED', 'SUSPENDED']).optional(),
   group: record.extend({
     name: z.string(),
     constitution: z.string().nullish(),

@@ -1,12 +1,12 @@
+import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { useFocusEffect } from 'expo-router';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   KeyboardAvoidingView,
   TouchableOpacity,
-  TextInput,
+
   Alert,
   ActivityIndicator,
   RefreshControl,
@@ -14,8 +14,7 @@ import {
   Animated,
   LayoutAnimation,
   Platform,
-  UIManager,
-} from 'react-native';
+  UIManager } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
@@ -80,21 +79,21 @@ export default function KikaoAkibaScreen() {
     }
 
     try {
-      const res = await apiClient.get('/shares/session-data');
+      const res = await apiClient.get('/shares/session-data', { validateStatus: code => code === 200 || code === 204 || code === 304 });
+      if (res.status !== 200) return;
       if (version !== requestVersion.current) return;
       const fresh = {
         cycleInfo: res.data?.cycleInfo || null,
         rules: res.data?.rules || null,
         myHistory: res.data?.myHistory || null,
-        members: Array.isArray(res.data?.members) ? res.data.members : [],
-      };
+        members: Array.isArray(res.data?.members) ? res.data.members : [] };
       setCycleInfo(fresh.cycleInfo);
       setRules(fresh.rules);
       setMyHistory(fresh.myHistory);
       setMembers(fresh.members);
       await setCachedData(cacheKey, fresh);
     } catch {
-      if (version === requestVersion.current) setSyncError(true);
+      if (version === requestVersion.current && (cached?.members?.length > 0 || cached?.myHistory?.shares?.length > 0 || cached?.myHistory?.fines?.length > 0 || cached?.myHistory?.papoInterestTxs?.length > 0)) setSyncError(true);
     } finally {
       if (version === requestVersion.current) {
         setSyncing(false);
@@ -201,8 +200,7 @@ export default function KikaoAkibaScreen() {
         socialFundPaid: effectiveSocial,
         papoInterestPaid: effectivePapo,
         selectedFineKeys,
-        markFinesPaid,
-      });
+        markFinesPaid });
       Alert.alert('Imefanikiwa', res.data?.message);
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setExpandedMemberId(null);
@@ -292,7 +290,7 @@ export default function KikaoAkibaScreen() {
           <Text className="text-sm text-amber-900">Imeshindikana kusasisha taarifa za kikao. Bonyeza kujaribu tena.</Text>
         </TouchableOpacity>
       )}
-      <ScrollView
+      <FormScrollView
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         className="flex-1 px-5 pt-4"
@@ -330,7 +328,7 @@ export default function KikaoAkibaScreen() {
               {/* SEARCH BAR & VICHUJIO */}
               <View className={`flex-row items-center rounded-xl px-3.5 py-2.5 border mb-2.5 ${cardClass}`}>
                 <Ionicons name="search-outline" size={18} color="#64748b" />
-                <TextInput
+                <FormTextInput
                   className={`flex-1 ml-2 text-xs font-semibold ${textMain}`}
                   placeholder="Tafuta jina la mwanachama..."
                   placeholderTextColor="#94a3b8"
@@ -452,7 +450,7 @@ export default function KikaoAkibaScreen() {
                             <Text className={`text-xs font-bold mb-1 ${textMain}`}>
                               Hisa ({minShares}-{maxShares}) {isNoShareLocked ? '🔒' : ''}
                             </Text>
-                            <TextInput
+                            <FormTextInput
                               editable={!isNoShareLocked}
                               className={`border rounded-xl p-2.5 font-bold ${
                                 isNoShareLocked
@@ -477,7 +475,7 @@ export default function KikaoAkibaScreen() {
                           </View>
                           <View className="flex-1">
                             <Text className={`text-xs font-bold mb-1 ${textSub}`}>Thamani (Auto)</Text>
-                            <TextInput
+                            <FormTextInput
                               editable={false}
                               className={`border rounded-xl p-2.5 font-bold ${disabledInputClass}`}
                               value={`TZS ${autoSharesTotal.toLocaleString()}`}
@@ -490,7 +488,7 @@ export default function KikaoAkibaScreen() {
                             <Text className={`text-xs font-bold mb-1 ${textMain}`}>
                               Jamii ({minSocial.toLocaleString()}-{maxSocial.toLocaleString()}) {isNoSocialLocked ? '🔒' : ''}
                             </Text>
-                            <TextInput
+                            <FormTextInput
                               editable={!isNoSocialLocked}
                               className={`border rounded-xl p-2.5 font-bold ${
                                 isNoSocialLocked
@@ -517,7 +515,7 @@ export default function KikaoAkibaScreen() {
                           {rules?.hasPapo && (
                             <View className="flex-1">
                               <Text className={`text-xs font-bold mb-1 ${textSub}`}>Riba ya Papo (Auto) 🔒</Text>
-                              <TextInput
+                              <FormTextInput
                                 editable={false}
                                 className={`border rounded-xl p-2.5 font-bold ${disabledInputClass}`}
                                 value={
@@ -593,7 +591,7 @@ export default function KikaoAkibaScreen() {
                               })}
                             </View>
 
-                            <TextInput
+                            <FormTextInput
                               editable={false}
                               className={`border rounded-xl p-2.5 font-extrabold text-xs text-rose-700 ${disabledInputClass}`}
                               value={`Jumla ya Faini (Auto): TZS ${autoFinesTotal.toLocaleString()}`}
@@ -789,7 +787,7 @@ export default function KikaoAkibaScreen() {
 
           <View className="h-10" />
         </Animated.View>
-      </ScrollView>
+      </FormScrollView>
     </KeyboardAvoidingView>
   );
 }

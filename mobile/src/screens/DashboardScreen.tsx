@@ -213,7 +213,7 @@ export default function DashboardScreen() {
   const textSub = isDark ? 'text-slate-400' : 'text-slate-500';
 
   const guarantorRequests = Array.isArray(feed?.guarantorRequests) ? feed.guarantorRequests : [];
-  const leaderPendingLoans = Array.isArray(feed?.leaderPendingLoans) ? feed.leaderPendingLoans : [];
+  const leaderPendingLoans = Array.isArray(feed?.leaderPendingLoans) ? feed.leaderPendingLoans.filter((loan: any) => !loan.guarantorId || loan.guarantorStatus === 'ACCEPTED') : [];
   const unreadAnnouncements = Array.isArray(feed?.unreadAnnouncements) ? feed.unreadAnnouncements : [];
   const myActiveLoans = Array.isArray(feed?.myActiveLoans) ? feed.myActiveLoans : [];
 

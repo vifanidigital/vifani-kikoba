@@ -42,7 +42,7 @@ router.get('/share-out', authenticateToken, async (req: AuthRequest, res: Respon
     if (!group || !memberships.some(member => member.userId === userId)) {
       return res.status(404).json({ error: 'Uanachama hai wa kikundi haujapatikana.' });
     }
-    if (!['KIKOBA', 'SHARES'].includes(group.groupType)) {
+    if (!['KIKOBA', 'SHARES', 'VICOBA'].includes(group.groupType.trim().toUpperCase())) {
       return res.status(400).json({ error: 'Kanuni ya mgawo wa aina hii ya kikundi bado haijapatikana.' });
     }
     const result = calculateShareOut({

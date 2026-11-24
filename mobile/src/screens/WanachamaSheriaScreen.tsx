@@ -1,18 +1,18 @@
+import { AddMemberForm, MemberStatusForm } from '../components/OfficeMemberForms';
+import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
-  TextInput,
+
   Alert,
   ActivityIndicator,
   RefreshControl,
   Linking,
-  Switch,
-} from 'react-native';
+  Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
@@ -35,8 +35,6 @@ export default function WanachamaSheriaScreen() {
   const { role, user, group: activeGroup } = useAuth();
   const { isDark } = useTheme();
 
-  const isChairperson = role === 'CHAIRPERSON';
-  const isLeader = LEADER_ROLES.includes(String(role || ''));
 
   const [saving, setSaving] = useState(false);
   const [activeSection, setActiveSection] = useState<'MEMBERS' | 'RULES' | 'CONSTITUTION'>('MEMBERS');
@@ -57,6 +55,9 @@ export default function WanachamaSheriaScreen() {
   const scope = `${activeGroup?.id}_${user?.id}_${role}`;
   const panel = useTabData('/group/settings', scope, parseOffice);
 
+  const viewerRole = panel.data?.viewerRole ?? role;
+  const isChairperson = viewerRole === 'CHAIRPERSON';
+  const isLeader = LEADER_ROLES.includes(String(viewerRole || ''));
   const group: any = panel.data?.group;
   const directory = panel.data?.directory ?? [];
   const loadOffice = panel.reload;
@@ -137,8 +138,7 @@ export default function WanachamaSheriaScreen() {
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
           '*/*',
         ],
-        copyToCacheDirectory: true,
-      });
+        copyToCacheDirectory: true });
 
       if (result.canceled || !result.assets || result.assets.length === 0) return;
       const asset = result.assets[0];
@@ -202,8 +202,7 @@ export default function WanachamaSheriaScreen() {
       if (canShare) {
         await Sharing.shareAsync(uri, {
           mimeType: 'application/pdf',
-          dialogTitle: `Katiba ya ${group?.name || 'Kikundi'}`,
-        });
+          dialogTitle: `Katiba ya ${group?.name || 'Kikundi'}` });
       } else {
         await Print.printAsync({ html });
       }
@@ -290,7 +289,7 @@ export default function WanachamaSheriaScreen() {
         <TopTabs selected={activeSection} onSelect={setActiveSection} tabs={[{ id: 'MEMBERS', label: 'Wanachama' }, { id: 'RULES', label: 'Sheria na Faini' }, { id: 'CONSTITUTION', label: 'Katiba na PDF' }]} />
       </View>
 
-      <ScrollView
+      <FormScrollView
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         className="flex-1 px-5 pt-4"
@@ -303,11 +302,15 @@ export default function WanachamaSheriaScreen() {
         }
       >
         <View>
+          {(panel.data?.subscriptionAccess === 'EXPIRED' || panel.data?.subscriptionAccess === 'SUSPENDED') && (
+            <Text className="mb-3 rounded-xl bg-amber-100 p-3 text-sm text-amber-900">Kikundi kinaweza kusoma taarifa. Wasiliana na msimamizi kuhusu huduma.</Text>
+          )}
           <TabDataNotice loading={panel.loading} error={panel.error} hasData={panel.data != null} retry={panel.reload} />
-          {isChairperson && group && <GroupAnnouncementEditor group={group} reload={loadOffice} />}
+          {isChairperson && group && <GroupAnnouncementEditor key={scope} group={group} reload={loadOffice} />}
           {panel.data != null && <>
           {activeSection === 'MEMBERS' && (
             <>
+              {isChairperson && <AddMemberForm reload={loadOffice} />}
               <View className="bg-slate-900 p-4 rounded-2xl mb-4 border border-slate-800 shadow-sm">
                 <Text className="text-teal-300 text-xs font-extrabold uppercase mb-1.5">
                   Ratiba ya Vikao vya Kikundi
@@ -335,7 +338,7 @@ export default function WanachamaSheriaScreen() {
 
               <View className={`flex-row items-center px-3.5 py-2.5 rounded-xl border mb-3 ${cardClass}`}>
                 <Ionicons name="search" size={16} color="#64748b" />
-                <TextInput
+                <FormTextInput
                   placeholder="Tafuta mwanachama kwa jina au namba..."
                   placeholderTextColor="#94a3b8"
                   className={`flex-1 ml-2 text-xs font-semibold ${textMain}`}
@@ -369,6 +372,7 @@ export default function WanachamaSheriaScreen() {
                       >
                         <View className="flex-row items-center gap-2 flex-wrap">
                           <Text className={`font-extrabold text-sm ${textMain}`}>{m.fullName}</Text>
+                          {!m.isActive && <Text className="rounded bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">Si hai</Text>}
                           <View className="bg-teal-600/15 px-2 py-0.5 rounded-md">
                             <Text className="text-[10px] font-bold text-teal-700">{getRoleLabel(m.role)}</Text>
                           </View>
@@ -388,6 +392,8 @@ export default function WanachamaSheriaScreen() {
                       </TouchableOpacity>
                     </View>
 
+                    {!m.isActive && m.suspensionReason ? <Text className={'mt-2 text-xs ' + textSub}>{m.suspensionReason}</Text> : null}
+                    {isChairperson && m.userId !== user?.id && m.role !== 'CHAIRPERSON' && <MemberStatusForm member={m} reload={loadOffice} />}
                     {isLeader && isAuditing && (
                       <View className="mt-3 pt-3 border-t border-slate-200/30 bg-teal-600/10 p-3 rounded-xl">
                         {auditLoading ? (
@@ -397,6 +403,16 @@ export default function WanachamaSheriaScreen() {
                             <Text className="text-[11px] font-extrabold text-teal-800 uppercase mb-1.5">
                               Taarifa za Siri za {m.fullName} (Ukaguzi)
                             </Text>
+                            {typeof auditData.netPersonalClaims === 'number' && (
+                              <View className="mb-2">
+                                <Text className={'text-xs ' + textSub}>Michango na stahiki binafsi: TZS {Number(auditData.personalClaims).toLocaleString()}</Text>
+                                <Text className={'text-xs ' + textSub}>Jumla ya madeni: TZS {Number(auditData.totalDebt).toLocaleString()}</Text>
+                                <Text className={'text-xs font-bold ' + textMain}>
+                                  {auditData.netPersonalClaims > 0 ? 'Kikundi kinadaiwa na mwanachama' : auditData.netPersonalClaims < 0 ? 'Mwanachama anadaiwa na kikundi' : 'Salio ni sifuri'} · TZS {Math.abs(auditData.netPersonalClaims).toLocaleString()}
+                                </Text>
+                                <Text className={'text-xs ' + textSub}>Makadirio kabla ya gawio la pamoja.</Text>
+                              </View>
+                            )}
                             <View className="flex-row justify-between py-0.5">
                               <Text className={`text-xs ${textSub}`}>Hisa ({auditData.sharesCount}):</Text>
                               <Text className={`text-xs font-bold ${textMain}`}>
@@ -526,7 +542,7 @@ export default function WanachamaSheriaScreen() {
                 ) : (
                   <View className="space-y-2.5">
                     <Text className={`text-xs font-bold ${textSub}`}>Jina la Kikundi:</Text>
-                    <TextInput
+                    <FormTextInput
                       className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                       value={String(rulesForm.name || '')}
                       onChangeText={(t) => setRulesForm({ ...rulesForm, name: t })}
@@ -534,13 +550,13 @@ export default function WanachamaSheriaScreen() {
 
                     <Text className={`text-xs font-bold ${textSub}`}>Mahali pa Kikao & Saa:</Text>
                     <View className="flex-row gap-2">
-                      <TextInput
+                      <FormTextInput
                         placeholder="Mahali"
                         className={`flex-1 border rounded-xl p-2.5 text-xs ${inputClass}`}
                         value={String(rulesForm.meetingVenue || '')}
                         onChangeText={(t) => setRulesForm({ ...rulesForm, meetingVenue: t })}
                       />
-                      <TextInput
+                      <FormTextInput
                         placeholder="Saa (16:00)"
                         className={`w-28 border rounded-xl p-2.5 text-xs ${inputClass}`}
                         value={String(rulesForm.meetingTime || '')}
@@ -549,7 +565,7 @@ export default function WanachamaSheriaScreen() {
                     </View>
 
                     <Text className={`text-xs font-bold ${textSub}`}>Thamani ya Hisa Moja (TZS):</Text>
-                    <TextInput
+                    <FormTextInput
                       keyboardType="numeric"
                       className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                       value={String(rulesForm.shareValue ?? '')}
@@ -559,7 +575,7 @@ export default function WanachamaSheriaScreen() {
                     <View className="flex-row gap-2">
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Hisa Chini:</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.minSharesPerMeeting ?? '')}
@@ -568,7 +584,7 @@ export default function WanachamaSheriaScreen() {
                       </View>
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Hisa Juu:</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.maxSharesPerMeeting ?? '')}
@@ -580,7 +596,7 @@ export default function WanachamaSheriaScreen() {
                     <View className="flex-row gap-2">
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Jamii Chini (TZS):</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.socialFundMin ?? '')}
@@ -589,7 +605,7 @@ export default function WanachamaSheriaScreen() {
                       </View>
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Jamii Juu (TZS):</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.socialFundMax ?? '')}
@@ -608,7 +624,7 @@ export default function WanachamaSheriaScreen() {
                     {Boolean(rulesForm.hasPapo) && (
                       <View>
                         <Text className={`text-xs font-bold mb-1 ${textSub}`}>Kiasi cha Papo ya Lazima (TZS):</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.mandatoryPapoAmount ?? '')}
@@ -630,7 +646,7 @@ export default function WanachamaSheriaScreen() {
                     <View className="flex-row gap-2">
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Riba ya Papo (%):</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.papoMeetingInterest ?? '')}
@@ -639,7 +655,7 @@ export default function WanachamaSheriaScreen() {
                       </View>
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Majuma Papo Hiari:</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.topUpPapoWeeks ?? '')}
@@ -651,7 +667,7 @@ export default function WanachamaSheriaScreen() {
                     <View className="flex-row gap-2">
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Papo Hiari Chini:</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.minTopUpPapoCap ?? '')}
@@ -660,7 +676,7 @@ export default function WanachamaSheriaScreen() {
                       </View>
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Papo Hiari Juu:</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.maxTopUpPapoCap ?? '')}
@@ -672,7 +688,7 @@ export default function WanachamaSheriaScreen() {
                     <View className="flex-row gap-2">
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Riba Mkopo (%):</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.interestRate ?? '')}
@@ -681,7 +697,7 @@ export default function WanachamaSheriaScreen() {
                       </View>
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Miezi ya Mkopo:</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.maxRepaymentMonths ?? '')}
@@ -693,7 +709,7 @@ export default function WanachamaSheriaScreen() {
                     <View className="flex-row gap-2">
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Mara ya Hisa (Mkopo):</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.loanLimitMultiplier ?? '')}
@@ -702,7 +718,7 @@ export default function WanachamaSheriaScreen() {
                       </View>
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Ukomo Mkopo (TZS):</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.maxBigLoanCap ?? '')}
@@ -735,7 +751,7 @@ export default function WanachamaSheriaScreen() {
                     ].map((fn) => (
                       <View key={fn.key} className="flex-row justify-between items-center py-1">
                         <Text className={`text-xs flex-1 ${textSub}`}>{fn.label}:</Text>
-                        <TextInput
+                        <FormTextInput
                           keyboardType="numeric"
                           className={`w-32 border rounded-xl p-2 text-xs font-bold text-right ${inputClass}`}
                           value={String(rulesForm[fn.key] ?? '0')}
@@ -832,7 +848,7 @@ export default function WanachamaSheriaScreen() {
 
               {isEditingConstitution ? (
                 <>
-                  <TextInput
+                  <FormTextInput
                     multiline
                     numberOfLines={12}
                     textAlignVertical="top"
@@ -876,7 +892,7 @@ export default function WanachamaSheriaScreen() {
           <View className="h-10" />
           </>}
         </View>
-      </ScrollView>
+      </FormScrollView>
 
       {Boolean(contactMember) && (
         <View
@@ -890,8 +906,7 @@ export default function WanachamaSheriaScreen() {
             justifyContent: 'center',
             alignItems: 'center',
             paddingHorizontal: 24,
-            zIndex: 999,
-          }}
+            zIndex: 999 }}
         >
           <View className="bg-white w-full rounded-3xl p-6 shadow-xl">
             <View className="flex-row justify-between items-center mb-3">

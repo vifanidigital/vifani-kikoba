@@ -291,7 +291,7 @@ router.post('/record-meeting', authenticateToken, async (req: AuthRequest, res: 
     if (!LEADER_ROLES.includes(role)) return res.status(403).json({ error: 'Viongozi pekee.' });
 
     const targetUserId = String(req.body.targetUserId || '');
-    const selectedFineKeys: string[] = Array.isArray(req.body.selectedFineKeys) ? req.body.selectedFineKeys : [];
+    const selectedFineKeys: string[] = Array.isArray(req.body.selectedFineKeys) ? [...new Set<string>(req.body.selectedFineKeys)] : [];
     const sharesCount = selectedFineKeys.includes('NO_SHARE') ? 0 : Number(req.body.sharesCount || 0);
     const socialFundPaid = selectedFineKeys.includes('NO_SOCIAL') ? 0 : Number(req.body.socialFundPaid || 0);
     const papoInterestPaid = selectedFineKeys.includes('NO_PAPO_INT') ? 0 : Number(req.body.papoInterestPaid || 0);
@@ -312,12 +312,19 @@ router.post('/record-meeting', authenticateToken, async (req: AuthRequest, res: 
       OTHER: { label: 'Faini Nyinginezo', amount: group.otherPenalty },
     };
 
+    if (!Number.isInteger(sharesCount) || sharesCount < 0 || ![socialFundPaid, papoInterestPaid].every(amount => Number.isFinite(amount) && amount >= 0)) {
+      return res.status(400).json({ error: 'Weka idadi halali ya hisa na michango isiyo hasi.' });
+    }
     const amountPaid = sharesCount * group.shareValue;
     const meetingDate = new Date();
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    await prisma.$transaction(async (tx) => {
+    const recorded = await prisma.$transaction(async (tx) => {
+      const membership = await tx.groupMember.findUnique({
+        where: { groupId_userId: { groupId, userId: targetUserId } }, select: { isActive: true },
+      });
+      if (!membership?.isActive) return false;
       await tx.shareRecord.deleteMany({ where: { groupId, userId: targetUserId, meetingDate: { gte: startOfToday } } });
       await tx.transaction.deleteMany({ where: { groupId, userId: targetUserId, type: 'PAPO_INTEREST', createdAt: { gte: startOfToday } } });
       await tx.fineRecord.deleteMany({ where: { groupId, userId: targetUserId, createdAt: { gte: startOfToday } } });
@@ -348,7 +355,9 @@ router.post('/record-meeting', authenticateToken, async (req: AuthRequest, res: 
           });
         }
       }
-    });
+      return true;
+    }, { isolationLevel: 'Serializable' });
+    if (!recorded) return res.status(409).json({ error: 'Mwanachama huyu si hai kwenye kikundi hiki.' });
 
     res.status(201).json({ message: 'Taarifa za kikao zimehifadhiwa!' });
   } catch {

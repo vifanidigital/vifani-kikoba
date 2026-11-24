@@ -1,16 +1,15 @@
+import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import React, { useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
-  TextInput,
+
   Alert,
   ActivityIndicator,
   RefreshControl,
   KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+  Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
@@ -127,8 +126,7 @@ export default function MikopoPapoScreen() {
       const res = await apiClient.post('/loans/apply', {
         amount: numericLoan,
         months: fixedMonths,
-        guarantorId: selectedGuarantorId || null,
-      });
+        guarantorId: selectedGuarantorId || null });
       Alert.alert('Imefanikiwa', res.data?.message);
       setShowLoanModal(false);
       setLoanAmount('');
@@ -224,7 +222,7 @@ export default function MikopoPapoScreen() {
 
         <TopTabs selected={activeTab} onSelect={setActiveTab} tabs={[{ id: 'PAPO', label: 'Mfuko wa Papo' }, { id: 'LOANS', label: 'Mikopo Mikubwa' }]} />
       </View>
-      <ScrollView
+      <FormScrollView
         keyboardShouldPersistTaps="handled"
         className="flex-1 px-5 pt-4"
         showsVerticalScrollIndicator={false}
@@ -542,7 +540,7 @@ export default function MikopoPapoScreen() {
                         </View>
                       )}
 
-                      {isLeader && l.status === 'PENDING' && (
+                      {isLeader && l.status === 'PENDING' && (!l.guarantorId || l.guarantorStatus === 'ACCEPTED') && (
                         <TouchableOpacity
                           onPress={() => handleApproveLoan(l.id)}
                           className="bg-teal-700 py-2.5 rounded-xl items-center mt-3"
@@ -620,7 +618,7 @@ export default function MikopoPapoScreen() {
           <View className="h-10" />
           </>}
         </View>
-      </ScrollView>
+      </FormScrollView>
       {showTopUpModal && (
         <View
           style={{
@@ -631,8 +629,7 @@ export default function MikopoPapoScreen() {
             bottom: 0,
             backgroundColor: 'rgba(0,0,0,0.55)',
             justifyContent: 'flex-end',
-            zIndex: 999,
-          }}
+            zIndex: 999 }}
         >
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -642,10 +639,9 @@ export default function MikopoPapoScreen() {
               borderTopLeftRadius: 24,
               borderTopRightRadius: 24,
               padding: 24,
-              paddingBottom: Math.max(insets.bottom + 16, 24),
-            }}
+              paddingBottom: Math.max(insets.bottom + 16, 24) }}
           >
-            <ScrollView keyboardShouldPersistTaps="handled">
+            <FormScrollView keyboardShouldPersistTaps="handled">
             <View className="flex-row justify-between items-center mb-3">
               <Text className="text-lg font-bold text-slate-900">Omba Papo ya Hiari</Text>
               <TouchableOpacity onPress={() => setShowTopUpModal(false)}>
@@ -673,7 +669,7 @@ export default function MikopoPapoScreen() {
               </View>
             )}
 
-            <TextInput
+            <FormTextInput
               className={`border rounded-xl p-3.5 mb-3 text-base font-bold text-slate-900 ${
                 isTopUpExceeding || isTopUpBelowMin ? 'bg-rose-50 border-rose-500' : 'bg-slate-50 border-slate-300'
               }`}
@@ -702,7 +698,7 @@ export default function MikopoPapoScreen() {
             <Text className="text-xs font-bold text-slate-500 mb-1">
               Muda wa Kurejesha (Sheria ya Kikoba - Imefungwa) 🔒
             </Text>
-            <TextInput
+            <FormTextInput
               editable={false}
               className="bg-slate-200/80 border border-slate-300 rounded-xl p-3 mb-3 font-bold text-slate-600"
               value={`Majuma ${papoData?.topUpPapoWeeks || 4}`}
@@ -717,7 +713,7 @@ export default function MikopoPapoScreen() {
             >
               {submitting ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Tuma Ombi</Text>}
             </TouchableOpacity>
-            </ScrollView>
+            </FormScrollView>
           </KeyboardAvoidingView>
         </View>
       )}
@@ -731,8 +727,7 @@ export default function MikopoPapoScreen() {
             bottom: 0,
             backgroundColor: 'rgba(0,0,0,0.55)',
             justifyContent: 'flex-end',
-            zIndex: 999,
-          }}
+            zIndex: 999 }}
         >
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -742,8 +737,7 @@ export default function MikopoPapoScreen() {
               borderTopLeftRadius: 24,
               borderTopRightRadius: 24,
               padding: 24,
-              paddingBottom: Math.max(insets.bottom + 16, 24),
-            }}
+              paddingBottom: Math.max(insets.bottom + 16, 24) }}
           >
             <View className="flex-row justify-between items-center mb-3">
               <Text className="text-lg font-bold text-slate-900">Omba Mkopo Mkubwa</Text>
@@ -752,7 +746,7 @@ export default function MikopoPapoScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <FormScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text className="text-xs font-bold text-slate-700 mb-1.5">
                 Kiasi cha Mkopo (Ukomo: TZS {effectiveMaxLoan.toLocaleString()})
               </Text>
@@ -778,7 +772,7 @@ export default function MikopoPapoScreen() {
                 </View>
               )}
 
-              <TextInput
+              <FormTextInput
                 className={`border rounded-xl p-3.5 mb-3 text-base font-bold text-slate-900 ${
                   isLoanExceeding ? 'bg-rose-50 border-rose-500' : 'bg-slate-50 border-slate-300'
                 }`}
@@ -798,7 +792,7 @@ export default function MikopoPapoScreen() {
               <Text className="text-xs font-bold text-slate-500 mb-1">
                 Muda wa Kurejesha (Sheria ya Kikoba - Imefungwa) 🔒
               </Text>
-              <TextInput
+              <FormTextInput
                 editable={false}
                 className="bg-slate-200/80 border border-slate-300 rounded-xl p-3.5 mb-3 text-base font-bold text-slate-600"
                 value={`Miezi ${fixedMonths}`}
@@ -850,7 +844,7 @@ export default function MikopoPapoScreen() {
               >
                 {submitting ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Tuma Ombi la Mkopo</Text>}
               </TouchableOpacity>
-            </ScrollView>
+            </FormScrollView>
           </KeyboardAvoidingView>
         </View>
       )}

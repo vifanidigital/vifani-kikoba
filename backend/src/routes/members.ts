@@ -1,6 +1,8 @@
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { z } from 'zod';
+import { normalizeTzPhone } from './auth';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
 
 const router = Router();
@@ -76,66 +78,68 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   }
 });
 
+const memberInput = z.object({
+  fullName: z.string().trim().min(2).max(120),
+  phone: z.string().trim(),
+  pin: z.string().regex(/^\d{4,6}$/).optional(),
+});
+
 router.post('/add', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (req.user!.role !== 'CHAIRPERSON') return res.status(403).json({ error: 'Mwenyekiti pekee anaweza kuongeza mwanachama.' });
+  const input = memberInput.safeParse(req.body);
+  if (!input.success) return res.status(400).json({ error: 'Weka jina, namba sahihi na PIN yenye tarakimu 4 hadi 6 kwa akaunti mpya.' });
+  let phone: string;
+  try { phone = normalizeTzPhone(input.data.phone); }
+  catch { return res.status(400).json({ error: 'Weka namba halali ya simu ya Tanzania.' }); }
+  const { groupId } = req.user!;
+  const { fullName, pin } = input.data;
+
   try {
-    const { groupId, role } = req.user!;
-    if (!LEADER_ROLES.includes(role)) {
-      return res.status(403).json({ error: 'Viongozi pekee ndio wanaweza kusajili wanachama.' });
-    }
-
-    const fullName = String(req.body.fullName || '').trim();
-    const phone = normalizePhone(req.body.phone);
-    const memberRole = String(req.body.role || 'MEMBER').toUpperCase();
-
-    if (fullName.length < 2 || !/^255\d{9}$/.test(phone)) {
-      return res.status(400).json({ error: 'Weka jina kamili na namba sahihi ya simu (mf. 0712345678).' });
-    }
-
-    const group = await prisma.group.findUnique({ where: { id: groupId } });
-    if (!group) return res.status(404).json({ error: 'Kikoba hakijapatikana.' });
-
-    const defaultPinHash = await bcrypt.hash('2580', 10);
-
-    await prisma.$transaction(async (tx) => {
-      let user = await tx.user.findUnique({ where: { phone } });
-      if (!user) {
-        user = await tx.user.create({
-          data: { fullName, phone, pinHash: defaultPinHash, isVerified: false },
-        });
+    const pinHash = pin ? await bcrypt.hash(pin, 10) : null;
+    const result = await prisma.$transaction(async tx => {
+      const matches = await tx.user.findMany({ where: { phone: { in: [phone, '0' + phone.slice(3), '+' + phone, phone.slice(3), '00' + phone] } } });
+      if (matches.length > 1) return 'DUPLICATE_PHONE';
+      let member = matches[0];
+      const existingAccount = Boolean(member);
+      if (!member) {
+        if (!pinHash) return 'PIN_REQUIRED';
+        member = await tx.user.create({ data: { fullName, phone, pinHash, isVerified: false } });
       }
+      const existing = await tx.groupMember.findUnique({ where: { groupId_userId: { groupId, userId: member.id } } });
+      if (existing) return existing.isActive ? 'ACTIVE_MEMBER' : 'SUSPENDED_MEMBER';
+      await tx.groupMember.create({ data: { groupId, userId: member.id } });
+      return existingAccount ? 'EXISTING_ACCOUNT' : 'CREATED';
+    }, { isolationLevel: 'Serializable' });
+    if (result === 'PIN_REQUIRED') return res.status(400).json({ error: 'Akaunti mpya inahitaji PIN ya awali.' });
+    if (result === 'DUPLICATE_PHONE') return res.status(409).json({ error: 'Namba hii ina akaunti zaidi ya moja. Wasiliana na msimamizi.' });
+    if (result === 'ACTIVE_MEMBER') return res.status(409).json({ error: 'Mwanachama huyu tayari yupo.' });
+    if (result === 'SUSPENDED_MEMBER') return res.status(409).json({ error: 'Mwanachama huyu amesimamishwa. Tumia Rejesha kwenye orodha.' });
+    res.status(201).json({ message: result === 'EXISTING_ACCOUNT'
+      ? 'Mwanachama ameongezwa. Atumie PIN yake ya sasa.'
+      : 'Mwanachama ameongezwa. Mpe PIN yake ya awali faraghani.' });
+  } catch {
+    res.status(500).json({ error: 'Imeshindikana kuongeza mwanachama. Hakiki orodha kisha ujaribu tena.' });
+  }
+});
 
-      const existing = await tx.groupMember.findUnique({
-        where: { groupId_userId: { groupId, userId: user.id } },
-      });
-      if (existing && existing.isActive) {
-        throw new Error('Mwanachama huyu tayari yupo hai kwenye kikoba hiki.');
-      }
-
-      if (existing) {
-        await tx.groupMember.update({
-          where: { id: existing.id },
-          data: { isActive: true, role: memberRole },
-        });
-      } else {
-        await tx.groupMember.create({
-          data: { groupId, userId: user.id, role: memberRole, isActive: true },
-        });
-      }
-
-      if (group.hasPapo && group.mandatoryPapoAmount > 0) {
-        await tx.papoAccount.upsert({
-          where: { userId_groupId: { userId: user.id, groupId } },
-          update: {},
-          create: { groupId, userId: user.id, mandatoryBalance: group.mandatoryPapoAmount },
-        });
-      }
+router.patch('/:targetUserId/status', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { groupId, userId, role } = req.user!;
+  if (role !== 'CHAIRPERSON') return res.status(403).json({ error: 'Mwenyekiti pekee anaweza kubadili hali ya uanachama.' });
+  const target = String(req.params.targetUserId);
+  const input = z.object({ active: z.boolean(), reason: z.string().trim().max(240).optional() }).safeParse(req.body);
+  if (target === userId || !input.success || (!input.data.active && !input.data.reason)) {
+    return res.status(400).json({ error: 'Weka sababu ya kusimamisha mwanachama. Mwenyekiti hawezi kujisimamisha.' });
+  }
+  try {
+    const { active, reason } = input.data;
+    const changed = await prisma.groupMember.updateMany({
+      where: { groupId, userId: target, role: { not: 'CHAIRPERSON' } },
+      data: { isActive: active, suspendedAt: active ? null : new Date(), suspensionReason: active ? null : reason },
     });
-
-    res.status(201).json({
-      message: `${fullName} amesajiliwa! Atatumia namba yake na PIN ya awali 2580 kuingia.`,
-    });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message || 'Imeshindikana kusajili mwanachama.' });
+    if (!changed.count) return res.status(404).json({ error: 'Mwanachama wa kubadili hali yake hajapatikana.' });
+    res.json({ message: active ? 'Uanachama umerejeshwa.' : 'Mwanachama amesimamishwa.' });
+  } catch {
+    res.status(500).json({ error: 'Imeshindikana kubadili hali ya uanachama.' });
   }
 });
 
@@ -151,10 +155,15 @@ router.put('/update/:targetUserId', authenticateToken, async (req: AuthRequest, 
     const phone = normalizePhone(req.body.phone);
     const newRole = String(req.body.role || 'MEMBER').toUpperCase();
 
-    if (fullName.length < 2 || !/^255\d{9}$/.test(phone)) {
-      return res.status(400).json({ error: 'Jina kamili au namba ya simu si sahihi.' });
+    if (!['MEMBER', 'SECRETARY', 'TREASURER'].includes(newRole) || fullName.length < 2 || !/^255[67]\d{8}$/.test(phone)) {
+      return res.status(400).json({ error: 'Jina, namba au nafasi ya mwanachama si sahihi.' });
     }
 
+    const membership = await prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId: targetUserId } } });
+    if (!membership || membership.role === 'CHAIRPERSON') return res.status(403).json({ error: 'Uanachama huu hauwezi kuhaririwa hapa.' });
+    if (await prisma.groupMember.count({ where: { userId: targetUserId, groupId: { not: groupId } } })) {
+      return res.status(409).json({ error: 'Akaunti hii inatumika kwenye vikundi vingine. Mwanachama asasishe wasifu wake mwenyewe.' });
+    }
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: targetUserId },
