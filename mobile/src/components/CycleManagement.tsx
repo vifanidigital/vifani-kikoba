@@ -1,24 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Alert, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { isAxiosError } from 'axios';
+import { File, Paths } from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { apiClient } from '../api/client';
+import { cycleReportHtml, type CycleReport } from '../utils/cycleReport';
 
 type Member = {
   userId: string; fullName: string; myPapoMandatoryDebt: number;
   myPapoMandatory: number; payoutAfterPapoRepayment: number; otherDeductions: number; netPayout: number; balanceToCollect: number;
 };
 type Archive = { id: string; startedAt: string; closedAt: string };
-type Report = Archive & {
-  groupName: string;
-  result: { membersPayout: Member[]; distributableProfitPool: number; totalExpenses: number };
-};
-
 const money = (amount: number) => 'TZS ' + amount.toLocaleString('en-TZ');
 const date = (value: string) => new Date(value).toLocaleDateString('sw-TZ', { timeZone: 'Africa/Dar_es_Salaam' });
-const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
 
 export default function CycleManagement({ canClose, closedAt, preview, reload }: {
   canClose: boolean;
@@ -66,24 +61,37 @@ export default function CycleManagement({ canClose, closedAt, preview, reload }:
 
   const exportPdf = async (id: string) => {
     setBusy(true);
+    let html = '';
     try {
-      const { data } = await apiClient.get<Report>('/transparency/cycles/' + encodeURIComponent(id));
-      const rows = data.result.membersPayout.map(member =>
-        '<tr><td>' + escapeHtml(member.fullName) + '</td><td>' + money(member.myPapoMandatoryDebt) +
-        '</td><td>' + money(member.payoutAfterPapoRepayment) + '</td><td>' + money(member.otherDeductions) +
-        '</td><td>' + money(member.balanceToCollect) + '</td><td>' + money(member.netPayout) + '</td></tr>',
-      ).join('');
-      const html = '<!doctype html><html lang="sw"><meta charset="utf-8"><style>body{font:13px sans-serif;padding:24px;color:#173b35}table{border-collapse:collapse;width:100%}th,td{border:1px solid #a1b8b0;padding:7px;text-align:left}tr{break-inside:avoid}thead{display:table-header-group}</style>' +
-        '<h1>Ripoti ya kufunga Kikoba</h1><h2>' + escapeHtml(data.groupName) + '</h2><p>' +
-        date(data.startedAt) + ' hadi ' + date(data.closedAt) + '</p><p>Faida ya kugawa: ' +
-        money(data.result.distributableProfitPool) + ' | Matumizi: ' + money(data.result.totalExpenses) +
-        '</p><p>Papo ya lazima imethibitishwa kurejeshwa na kubaki kwa mwenyewe. Mgawo halisi unaonyesha kiasi baada ya makato.</p>' +
-        '<table><thead><tr><th>Mwanachama</th><th>Papo ya kurejesha</th><th>Fedha za kutoa baada ya marejesho</th><th>Makato mengine</th><th>Salio jingine la kulipa</th><th>Mgawo halisi</th></tr></thead><tbody>' + rows + '</tbody></table></html>';
-      if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing unavailable');
-      const file = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', dialogTitle: 'Pakua au shiriki ripoti ya Kikoba' });
-    } catch {
-      Alert.alert('Hitilafu', 'Imeshindikana kutengeneza au kushiriki PDF.');
+      const { data } = await apiClient.get<CycleReport>('/transparency/cycles/' + encodeURIComponent(id));
+      html = cycleReportHtml(data);
+      if (Platform.OS === 'web' || !(await Sharing.isAvailableAsync())) {
+        await Print.printAsync({ html });
+        return;
+      }
+      const { uri } = await Print.printToFileAsync({ html });
+      const file = new File(uri);
+      if (!file.exists || !file.size) throw new Error('Faili la PDF halikupatikana.');
+      const named = new File(Paths.cache, 'Ripoti-Kikoba-' + data.closedAt.slice(0, 10) + '-' + Date.now() + '.pdf');
+      let shareUri = uri;
+      try {
+        await file.move(named);
+        shareUri = named.uri;
+      } catch {
+        // The original PDF can still be shared if renaming fails.
+      }
+      await Sharing.shareAsync(shareUri, { UTI: 'com.adobe.pdf', mimeType: 'application/pdf', dialogTitle: 'Shiriki ripoti ya mzunguko' });
+    } catch (error) {
+      if (!html) {
+        const detail = isAxiosError(error) ? error.response?.data?.error : error instanceof Error ? error.message : undefined;
+        Alert.alert('Ripoti haikupatikana', typeof detail === 'string' ? detail : 'Imeshindikana kupakia ripoti ya mzunguko. Jaribu tena.');
+      } else {
+        Alert.alert('PDF haikushirikiwa', 'Chagua Hifadhi kama PDF kwenye menyu ya uchapishaji.', [
+          { text: 'Funga', style: 'cancel' },
+          { text: 'Fungua uchapishaji', onPress: () => void Print.printAsync({ html }).catch(() =>
+            Alert.alert('Hitilafu', 'Imeshindikana kufungua uchapishaji wa ripoti.')) },
+        ]);
+      }
     } finally { setBusy(false); }
   };
 
