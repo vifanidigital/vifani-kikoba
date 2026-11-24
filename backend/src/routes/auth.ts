@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { addMonths } from '../lib/subscription';
@@ -7,7 +7,6 @@ import { z } from 'zod';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // Kusawazisha namba zote za Tanzania ziwe muundo mmoja (255XXXXXXXXX)
 export function normalizeTzPhone(raw: string): string {
@@ -78,11 +77,13 @@ const registerGroupSchema = z.object({
   treasurer: optionalLeaderSchema,
 });
 
-function buildToken(userId: string, groupId: string, role: string) {
+class ExistingAccountPinError extends Error {}
+
+function buildToken(userId: string, groupId: string, role: string, pinVersion: number) {
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET is missing');
   return jwt.sign(
-    { userId, groupId, role },
+    { userId, groupId, role, pinVersion },
     secret,
     { expiresIn: '30d' }
   );
@@ -155,7 +156,10 @@ router.post('/register-group', async (req: Request, res: Response) => {
 
         for (const leader of leadersToCreate) {
           const isCreator = leader.role === data.creatorRole || leadersToCreate.length === 1;
-          let user = await tx.user.findUnique({ where: { phone: leader.phone } });
+          const number = leader.phone;
+          const accounts = await tx.user.findMany({ where: { phone: { in: [number, '0' + number.slice(3), '+' + number, number.slice(3), '00' + number] } }, take: 2 });
+          if (accounts.length > 1) throw new ExistingAccountPinError('Namba hii ina akaunti zaidi ya moja. Wasiliana na msimamizi.');
+          let user = accounts[0];
 
           if (!user) {
             user = await tx.user.create({
@@ -167,11 +171,8 @@ router.post('/register-group', async (req: Request, res: Response) => {
                 isVerified: isCreator,
               },
             });
-          } else if (isCreator) {
-            user = await tx.user.update({
-              where: { id: user.id },
-              data: { pinHash: creatorPinHash, deviceId: data.deviceId, isVerified: true },
-            });
+          } else if (isCreator && !(await bcrypt.compare(data.pin, user.pinHash))) {
+            throw new ExistingAccountPinError('Tumia PIN yako ya sasa kusajili kikundi kingine.');
           }
 
           await tx.groupMember.create({
@@ -210,7 +211,7 @@ router.post('/register-group', async (req: Request, res: Response) => {
 
     const activeRole =
       result.memberships.find((m) => m.groupId === result.group.id)?.role || 'CHAIRPERSON';
-    const token = buildToken(result.creator.id, result.group.id, activeRole);
+    const token = buildToken(result.creator.id, result.group.id, activeRole, result.creator.pinVersion);
 
     res.status(201).json({
       message:
@@ -224,6 +225,7 @@ router.post('/register-group', async (req: Request, res: Response) => {
       user: { id: result.creator.id, fullName: result.creator.fullName, phone: result.creator.phone },
     });
   } catch (error: any) {
+    if (error instanceof ExistingAccountPinError) return res.status(409).json({ error: error.message });
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.issues[0].message });
     }
@@ -254,7 +256,7 @@ router.post('/login', async (req: Request, res: Response) => {
     // Tafuta kwa muundo uliosawazishwa (2557...) au muundo wa zamani (07...) ikiwa upo
     const users = await prisma.user.findMany({
       where: { phone: { in: [normalizedPhone, '0' + normalizedPhone.slice(3), '+' + normalizedPhone, normalizedPhone.slice(3), '00' + normalizedPhone] } },
-      select: { id: true, fullName: true, pinHash: true },
+      select: { id: true, fullName: true, pinHash: true, pinVersion: true },
     });
     const candidates = await Promise.all(users.map(async candidate => await bcrypt.compare(pin, candidate.pinHash) ? candidate : null));
     const matches = candidates.filter(candidate => candidate !== null);
@@ -278,7 +280,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
     const primary = memberships.find(entry => entry.group.subscriptionStatus === 'ACTIVE' ||
       (entry.group.subscriptionStatus === 'TRIAL' && entry.group.trialEndsAt > new Date())) ?? memberships[0];
-    const token = buildToken(user.id, primary.groupId, primary.role);
+    const token = buildToken(user.id, primary.groupId, primary.role, user.pinVersion);
 
     res.json({
       token,
@@ -298,6 +300,36 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
+router.post('/reset-pin', async (req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  const input = z.object({ phone: z.string(), otp: z.string().regex(/^\d{6}$/), newPin: z.string().regex(/^\d{4,6}$/) }).safeParse(req.body);
+  if (!input.success) return res.status(400).json({ error: 'Weka namba ya simu, kodi ya tarakimu 6 na PIN mpya ya tarakimu 4 hadi 6.' });
+  const { otp, newPin } = input.data;
+  if (otp === newPin) return res.status(400).json({ error: 'Chagua PIN yako mwenyewe, tofauti na kodi ya muda.' });
+  let phone: string;
+  try { phone = normalizeTzPhone(input.data.phone); }
+  catch { return res.status(400).json({ error: 'Weka namba halali ya simu ya Tanzania.' }); }
+  const invalid = () => res.status(400).json({ error: 'Kodi si sahihi, imeisha au majaribio yamezidi. Omba kodi mpya kwa mwenyekiti.' });
+  const accounts = await prisma.user.findMany({
+    where: { phone: { in: [phone, '0' + phone.slice(3), '+' + phone, phone.slice(3), '00' + phone] } },
+    select: { id: true, otpCode: true },
+  });
+  const account = accounts.length === 1 ? accounts[0] : null;
+  if (!account?.otpCode) return invalid();
+  const attempt = await prisma.user.updateMany({
+    where: { id: account.id, otpCode: account.otpCode, otpExpiresAt: { gt: new Date() }, pinResetAttempts: { lt: 5 } },
+    data: { pinResetAttempts: { increment: 1 } },
+  });
+  if (!attempt.count || !(await bcrypt.compare(otp, account.otpCode))) return invalid();
+  const pinHash = await bcrypt.hash(newPin, 10);
+  const reset = await prisma.user.updateMany({
+    where: { id: account.id, otpCode: account.otpCode, otpExpiresAt: { gt: new Date() } },
+    data: { pinHash, otpCode: null, otpExpiresAt: null, pinResetAttempts: 0, pinVersion: { increment: 1 } },
+  });
+  if (!reset.count) return invalid();
+  res.json({ message: 'PIN imebadilishwa. Ingia kwa kutumia PIN mpya.' });
+});
+
 router.post('/switch-group', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
@@ -312,7 +344,7 @@ router.post('/switch-group', authenticateToken, async (req: AuthRequest, res: Re
       return res.status(403).json({ error: 'Huna uanachama hai kwenye kikoba hiki.' });
     }
 
-    const token = buildToken(userId, membership.groupId, membership.role);
+    const token = buildToken(userId, membership.groupId, membership.role, req.user!.pinVersion ?? 0);
     res.json({
       token,
       activeGroup: membership.group,
@@ -358,7 +390,7 @@ router.post('/change-pin', authenticateToken, async (req: AuthRequest, res: Resp
     const newPinHash = await bcrypt.hash(newPin, 10);
     await prisma.user.update({
       where: { id: userId },
-      data: { pinHash: newPinHash },
+      data: { pinHash: newPinHash, otpCode: null, otpExpiresAt: null, pinResetAttempts: 0 },
     });
 
     res.json({ message: 'PIN yako ya siri imebadilishwa kikamilifu!' });

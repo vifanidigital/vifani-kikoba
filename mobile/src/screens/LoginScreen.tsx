@@ -189,30 +189,22 @@ export default function LoginScreen() {
     }
   };
 
-  const handleForgotPin = async () => {
+  const handleForgotPin = () => {
     if (!isValidTzPhone(phone)) {
       return Alert.alert('Weka Namba Sahihi', 'Ingiza tarakimu 10 za namba yako ya simu iliyosajiliwa.');
     }
-    setLoading(true);
-    try {
-      const res = await apiClient.post('/auth/forgot-pin', { phone });
-      const data = res.data;
-      Alert.alert('OTP Imetumwa', `${data.message}`);
-      switchMode('RESET');
-    } catch (error: any) {
-      Alert.alert('Hitilafu', error.response?.data?.error || 'Huduma ya kurejesha PIN haipatikani kwa sasa. Wasiliana na uongozi wa kikundi.');
-    } finally {
-      setLoading(false);
-    }
+    switchMode('RESET');
   };
 
   const handleResetPin = async () => {
-    if (!/^\d{6}$/.test(otp) || !isValidPin(newPin)) {
+    if (!isValidTzPhone(phone) || !/^\d{6}$/.test(otp) || !isValidPin(newPin)) {
       return Alert.alert('Angalia Taarifa', 'Weka OTP ya tarakimu 6 na PIN mpya ya tarakimu 4 hadi 6.');
     }
     setLoading(true);
     try {
       const res = await apiClient.post('/auth/reset-pin', { phone, otp, newPin });
+      await AsyncStorage.removeItem('vifani_bio_creds').catch(() => {});
+      setHasSavedBiometrics(false);
       Alert.alert('Imefanikiwa', res.data?.message);
       setOtp('');
       setPin('');
@@ -368,6 +360,9 @@ export default function LoginScreen() {
                 </TouchableOpacity>
               )}
 
+              <TouchableOpacity onPress={() => switchMode('FORGOT')} disabled={loading} className="mt-4 items-center">
+                <Text className="font-bold text-teal-700">Nimesahau PIN</Text>
+              </TouchableOpacity>
               <View className="mt-6 pt-5 border-t border-slate-100 items-center">
                 <Text className="text-slate-500 text-xs mb-2">Huna kikundi kilichosajiliwa bado?</Text>
                 <TouchableOpacity
@@ -411,7 +406,7 @@ export default function LoginScreen() {
             <>
               <Text className="text-lg font-extrabold text-slate-900 mb-1">Rejesha PIN Yako</Text>
               <Text className="text-xs text-slate-500 mb-4">
-                Weka namba yako ya simu iliyosajiliwa kupokea kodi ya kubadili PIN
+                Omba kodi ya muda kwa mwenyekiti wa kikundi chako. Ukiipata, andika namba yako iliyosajiliwa.
               </Text>
               <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-base font-semibold text-slate-900"
@@ -426,7 +421,7 @@ export default function LoginScreen() {
                 onPress={handleForgotPin}
                 disabled={loading}
               >
-                {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Tuma Kodi ya OTP</Text>}
+                {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Nina kodi ya mwenyekiti</Text>}
               </TouchableOpacity>
               <TouchableOpacity onPress={() => switchMode('LOGIN')} className="items-center">
                 <Text className="text-slate-500 font-bold text-xs">Rudi Kwenye Kuingia</Text>
@@ -438,9 +433,9 @@ export default function LoginScreen() {
             <>
               <Text className="text-lg font-extrabold text-slate-900 mb-1">Weka PIN Mpya</Text>
               <Text className="text-xs text-slate-500 mb-4">
-                Ingiza kodi ya OTP na PIN yako mpya ya siri
+                Ingiza kodi uliyopewa na mwenyekiti na uchague PIN yako mpya ya siri.
               </Text>
-              <Text className="text-xs font-bold text-slate-700 mb-1.5">Kodi ya OTP (Tarakimu 6)</Text>
+              <Text className="text-xs font-bold text-slate-700 mb-1.5">Kodi ya mwenyekiti (Tarakimu 6)</Text>
               <FormTextInput
                 className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-base font-bold text-slate-900 tracking-widest"
                 placeholder="000000"

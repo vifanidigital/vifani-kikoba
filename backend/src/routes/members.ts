@@ -1,12 +1,13 @@
+import { randomInt } from 'node:crypto';
 import { Router, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { normalizeTzPhone } from './auth';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
 
 const router = Router();
-const prisma = new PrismaClient();
+const recoveryChecks = new Map<string, { count: number; until: number }>();
 const LEADER_ROLES = ['CHAIRPERSON', 'SECRETARY', 'TREASURER'];
 
 function normalizePhone(raw: string): string {
@@ -120,6 +121,40 @@ router.post('/add', authenticateToken, async (req: AuthRequest, res: Response) =
   } catch {
     res.status(500).json({ error: 'Imeshindikana kuongeza mwanachama. Hakiki orodha kisha ujaribu tena.' });
   }
+});
+
+router.post('/:targetUserId/pin-reset', authenticateToken, async (req: AuthRequest, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  const { userId, groupId, role } = req.user!;
+  if (role !== 'CHAIRPERSON') return res.status(403).json({ error: 'Mwenyekiti pekee anaweza kutoa kodi ya kurejesha PIN.' });
+  const target = String(req.params.targetUserId);
+  const input = z.object({ chairPin: z.string().regex(/^\d{4,6}$/) }).safeParse(req.body);
+  if (target === userId || !input.success) return res.status(400).json({ error: 'Weka PIN yako ya mwenyekiti na uchague mwanachama mwingine.' });
+  const now = Date.now();
+  for (const [id, window] of recoveryChecks) if (window.until <= now) recoveryChecks.delete(id);
+  const check = recoveryChecks.get(userId) ?? { count: 0, until: now + 5 * 60000 };
+  if (check.count >= 5) return res.status(429).json({ error: 'Majaribio yamezidi. Subiri dakika tano kisha ujaribu tena.' });
+  check.count++;
+  recoveryChecks.set(userId, check);
+  const chair = await prisma.user.findUnique({ where: { id: userId }, select: { pinHash: true } });
+  if (!chair || !(await bcrypt.compare(input.data.chairPin, chair.pinHash))) {
+    return res.status(400).json({ error: 'PIN ya mwenyekiti si sahihi.' });
+  }
+  recoveryChecks.delete(userId);
+  const code = String(randomInt(100000, 1000000));
+  const otpCode = await bcrypt.hash(code, 10);
+  const expiresAt = new Date(Date.now() + 15 * 60000);
+  const updated = await prisma.$transaction(async tx => {
+    const canReset = await tx.groupMember.count({ where: { groupId, userId, isActive: true, role: 'CHAIRPERSON', user: { pinHash: chair.pinHash } } });
+    if (!canReset) return false;
+    const result = await tx.user.updateMany({
+      where: { id: target, memberships: { some: { groupId, isActive: true, role: { not: 'CHAIRPERSON' } }, none: { groupId: { not: groupId } } } },
+      data: { otpCode, otpExpiresAt: expiresAt, pinResetAttempts: 0 },
+    });
+    return result.count === 1;
+  }, { isolationLevel: 'Serializable' });
+  if (!updated) return res.status(409).json({ error: 'Kodi inaruhusiwa kwa mwanachama hai mwenye akaunti ya kikundi hiki pekee.' });
+  res.status(201).json({ code, expiresAt });
 });
 
 router.patch('/:targetUserId/status', authenticateToken, async (req: AuthRequest, res: Response) => {

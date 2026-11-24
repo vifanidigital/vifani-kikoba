@@ -1,3 +1,4 @@
+import MemberPinReset from '../components/MemberPinReset';
 import { AddMemberForm, MemberStatusForm } from '../components/OfficeMemberForms';
 import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import React, { useState, useRef } from 'react';
@@ -165,6 +166,7 @@ export default function WanachamaSheriaScreen() {
   const handleShareConstitutionPdf = async () => {
     if (sharingConstitution) return;
     setSharingConstitution(true);
+    let fallbackHtml = '';
     try {
       const safeGroupName = String(group?.name || 'KIKOBA')
         .replace(/&/g, '&amp;')
@@ -200,6 +202,7 @@ export default function WanachamaSheriaScreen() {
         </html>
       `;
 
+      fallbackHtml = html;
       if (Platform.OS === 'web' || !(await Sharing.isAvailableAsync())) {
         await Print.printAsync({ html });
         return;
@@ -209,15 +212,28 @@ export default function WanachamaSheriaScreen() {
       if (!generated.exists || !generated.size) throw new Error('PDF haikutengenezwa.');
       const filename = String(group?.name || 'Kikundi').replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 45) || 'Kikundi';
       const named = new File(Paths.cache, 'Katiba-' + filename + '-' + Date.now() + '.pdf');
-      generated.move(named);
-      await Sharing.shareAsync(named.uri, {
+      let shareUri = generated.uri;
+      try {
+        await generated.move(named);
+        shareUri = named.uri;
+      } catch {
+        // The already-generated file remains usable if renaming fails.
+      }
+      await Sharing.shareAsync(shareUri, {
         mimeType: 'application/pdf',
         UTI: 'com.adobe.pdf',
         dialogTitle: 'Shiriki Katiba ya Kikundi',
       });
-    } catch (err: any) {
-      console.log('PDF Error:', err?.message);
-      Alert.alert('Hitilafu ya PDF', err?.message || 'Imeshindikana kutengeneza PDF ya Katiba.');
+    } catch {
+      Alert.alert('PDF haikuweza kushirikiwa', 'Unaweza kufungua menyu ya kuchapisha na kuchagua kuhifadhi kama PDF.', [
+        { text: 'Funga', style: 'cancel' },
+        ...(fallbackHtml && Platform.OS !== 'web' ? [{
+          text: 'Fungua uchapishaji',
+          onPress: () => void Print.printAsync({ html: fallbackHtml }).catch(() => {
+            Alert.alert('Hitilafu', 'Imeshindikana kufungua uchapishaji wa katiba.');
+          }),
+        }] : []),
+      ]);
     } finally {
       setSharingConstitution(false);
     }
@@ -405,6 +421,9 @@ export default function WanachamaSheriaScreen() {
 
                     {!m.isActive && m.suspensionReason ? <Text className={'mt-2 text-xs ' + textSub}>{m.suspensionReason}</Text> : null}
                     {isChairperson && m.userId !== user?.id && m.role !== 'CHAIRPERSON' && <MemberStatusForm member={m} reload={loadOffice} />}
+                    {isChairperson && m.isActive && m.userId !== user?.id && m.role !== 'CHAIRPERSON' && (
+                      <MemberPinReset key={scope + m.userId} userId={m.userId} name={m.fullName} />
+                    )}
                     {isLeader && isAuditing && (
                       <View className="mt-3 pt-3 border-t border-slate-200/30 bg-teal-600/10 p-3 rounded-xl">
                         {auditLoading ? (
