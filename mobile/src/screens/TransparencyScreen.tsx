@@ -1,3 +1,4 @@
+import CycleManagement from '../components/CycleManagement';
 import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -81,11 +82,12 @@ export default function TransparencyScreen() {
   const breakdown: [string, number][] = myEst ? [
     ['Hisa ulizochangia', myEst.myCapital],
     ['Michango yako ya Jamii', myEst.mySocialFund],
-    ['Mtaji wako wa Papo ya lazima', myEst.myPapoMandatory],
+    ['Papo ya lazima inayorudi kwako ukirejesha deni', myEst.myPapoMandatory],
+    ['Deni la Papo ya lazima la kurejesha wakati wa kufunga', -(myEst.myPapoMandatoryDebt ?? 0)],
     ['Riba yako ya mkopo iliyolipwa kwa wakati', myEst.myOnTimeLoanInterest],
     ['Nusu ya riba ya Papo uliyolipa', myEst.myPapoInterestRefund],
     ['Sehemu yako sawa ya faida ya kikundi', myEst.estimatedProfitDividend],
-    ['Makato ya madeni na faini zako', -myEst.totalDeductions],
+    ['Makato ya madeni mengine na faini', -(myEst.otherDeductions ?? myEst.totalDeductions)],
   ] : [];
 
   const handleShareWhatsAppReceipt = async () => {
@@ -157,6 +159,10 @@ export default function TransparencyScreen() {
       >
         <View>
           <TabDataNotice loading={panel.loading} error={panel.error} hasData={panel.data != null} retry={panel.reload} />
+          {activeTab === 'SHAREOUT' && currentFormula && isLeader && (
+            <CycleManagement key={scope} canClose={role === 'CHAIRPERSON'} closedAt={shareOutData?.cycleClosedAt}
+              preview={shareOutData?.closePreview} reload={async () => { await Promise.all([shareOut.reload(), expenseData.reload()]); }} />
+          )}
           {panel.data != null && <>
           {activeTab === 'SHAREOUT' && (
             <>
@@ -178,6 +184,8 @@ export default function TransparencyScreen() {
                     ))}
                     <Text className="mt-2 text-xs text-slate-300">
                       Jumla ya riba ya Papo uliyolipa ni {formatMoney(myEst.myPapoInterestPaid)}.
+                      {myEst.myPapoMandatoryDebt > 0 ? ' Rejesha deni la Papo ya lazima siku ya kufunga. Baada ya marejesho, kiasi cha kupokea ni ' + formatMoney(myEst.payoutAfterPapoRepayment) + ', kikiwemo kiasi chako cha Papo.' : ''}
+                      {myEst.balanceToCollect > 0 ? ' Salio la madeni mengine la kulipa ni ' + formatMoney(myEst.balanceToCollect) + '.' : ''}
                     </Text>
                     <TouchableOpacity onPress={handleShareWhatsAppReceipt} className="mt-3 self-start rounded-xl bg-teal-700 px-4 py-3">
                       <Text className="font-bold text-white">Shiriki makadirio</Text>

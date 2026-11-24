@@ -123,7 +123,7 @@ export default function WanachamaSheriaScreen() {
       `IBARA YA 5: NIDHAMU NA FAINI\n` +
       `Mwanachama atakayechelewa kikao, kutofika bila taarifa au kuchelewesha marejesho atalipa faini kulingana na sheria za kikundi.\n\n` +
       `IBARA YA 6: KUVUNJA KIKOBA (GAWIO)\n` +
-      `Mwisho wa mzunguko, hisa, Jamii, mtaji wa Papo ya lazima na riba ya mkopo iliyolipwa kwa wakati hurudi kwa mwenyewe. Kila mwanachama hupata nusu ya riba za Papo alizolipa. Nusu nyingine, riba zilizocheleweshwa na faini zilizolipwa huingia kwenye mfuko wa pamoja. Salio lake baada ya matumizi hugawanywa sawa kwa wanachama hai.`;
+      `Mwisho wa mzunguko, hisa, Jamii, riba ya mkopo iliyolipwa kwa wakati hurudi kwa mwenyewe. Papo ya lazima ni deni la kurejesha siku ya kufunga na hubaki mali ya mwenyewe. Kila mwanachama hupata nusu ya riba za Papo alizolipa. Nusu nyingine, riba zilizocheleweshwa na faini zilizolipwa huingia kwenye mfuko wa pamoja. Salio lake baada ya matumizi hugawanywa sawa kwa wanachama hai.`;
 
     setConstitutionDraft(template);
     setIsEditingConstitution(true);

@@ -12,7 +12,7 @@ router.use(authenticateToken, (req: AuthRequest, res, next) => {
   next();
 });
 
-const groupFields = { historicalMeetingStart: true, historicalMeetingWeekday: true, meetingDayOfWeek: true, hasPapo: true } as const;
+const groupFields = { cycleStartedAt: true, historicalMeetingStart: true, historicalMeetingWeekday: true, meetingDayOfWeek: true, hasPapo: true } as const;
 const todayInTanzania = () => parseMeetingDate(localDate(new Date()))!;
 
 router.get('/', async (req: AuthRequest, res) => {
@@ -35,6 +35,9 @@ router.put('/start', async (req: AuthRequest, res) => {
   const groupId = req.user!.groupId;
   const group = await prisma.group.findUnique({ where: { id: groupId }, select: groupFields });
   if (!group) return res.sendStatus(404);
+  if (group.cycleStartedAt && localDate(date) < localDate(group.cycleStartedAt)) {
+    return res.status(400).json({ error: 'Tarehe hiyo iko kabla ya mzunguko mpya.' });
+  }
   const weekday = group.historicalMeetingWeekday ?? group.meetingDayOfWeek;
   if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return res.status(400).json({ error: 'Kwanza weka siku halali ya kikao kwenye Ofisi na Sheria.' });
   if (group.historicalMeetingStart && date > group.historicalMeetingStart) {

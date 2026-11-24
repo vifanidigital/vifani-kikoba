@@ -31,11 +31,17 @@ export const parseLoans = z.looseObject({
   potentialGuarantors: z.array(record).optional(),
 }).parse;
 
+const cycleMember = z.object({
+  userId: z.string(), fullName: z.string(), myPapoMandatory: z.number(), myPapoMandatoryDebt: z.number(),
+  otherDeductions: z.number(), payoutAfterPapoRepayment: z.number(), netPayout: z.number(), grossPayout: z.number(), balanceToCollect: z.number(),
+});
 const equalShareOut = z.object({
   calculation: z.literal('KIKOBA_EQUAL_V1'),
+  cycleClosedAt: z.string().nullish(),
+  closePreview: z.object({ token: z.string(), members: z.array(cycleMember) }).nullish(),
   myEstimate: z.object({
     fullName: z.string(), myCapital: z.number(), mySocialFund: z.number(),
-    myPapoMandatory: z.number(), myOnTimeLoanInterest: z.number(), myPapoInterestPaid: z.number(),
+    myPapoMandatory: z.number(), myPapoMandatoryDebt: z.number().optional(), payoutAfterPapoRepayment: z.number().optional(), otherDeductions: z.number().optional(), balanceToCollect: z.number().optional(), myOnTimeLoanInterest: z.number(), myPapoInterestPaid: z.number(),
     myPapoInterestRefund: z.number(), estimatedProfitDividend: z.number(),
     totalDeductions: z.number(), netPayout: z.number(),
   }).nullable(),

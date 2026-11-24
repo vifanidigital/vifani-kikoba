@@ -46,6 +46,9 @@ model Group {
   historicalMeetingWeekday Int?
   meetingTime         String   @default("16:00")
   meetingVenue        String?
+  cycleStartedAt DateTime?
+  cycleClosedAt DateTime?
+  cycleArchives CycleArchive[]
   cycleMonths         Int      @default(12)
   shareValue          Float    @default(5000)
   minSharesPerMeeting Int      @default(1)
@@ -286,4 +289,16 @@ model SubscriptionPayment {
   recordedAt  DateTime @default(now())
 
   @@index([groupId, recordedAt])
+}
+
+model CycleArchive {
+  id        String   @id @default(uuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  startedAt DateTime
+  closedAt  DateTime
+  closedBy  String
+  snapshot  Json
+
+  @@index([groupId, closedAt])
 }

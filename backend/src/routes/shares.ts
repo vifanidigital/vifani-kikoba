@@ -209,7 +209,7 @@ router.get('/session-data', authenticateToken, async (req: AuthRequest, res: Res
     if (!group) return res.status(404).json({ error: 'Kikoba hakijapatikana.' });
 
     const now = new Date();
-    const start = group.historicalMeetingStart ?? group.createdAt;
+    const start = group.historicalMeetingStart ?? group.cycleStartedAt ?? group.createdAt;
     const msPerWeek = 7 * 24 * 60 * 60 * 1000;
     const currentWeek = Math.max(1, Math.floor((now.getTime() - start.getTime()) / msPerWeek) + 1);
     const totalWeeks = Math.max(currentWeek, Math.round((group.cycleMonths || 12) * 4.33));

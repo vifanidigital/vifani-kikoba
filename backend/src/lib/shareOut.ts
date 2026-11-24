@@ -4,9 +4,10 @@ type MemberAmount = { userId: string; amount: number };
 type LoanInterest = MemberAmount & { createdAt: Date; interestDueAt: Date | null };
 type Debt = { userId: string; status: string; amountPaid: number };
 type ShareOutInput = {
-  members: { userId: string; fullName: string }[];
+  members: { userId: string; fullName: string; isActive?: boolean }[];
   shares: { userId: string; sharesCount: number; amountPaid: number; socialFundPaid: number }[];
   papoAccounts: { userId: string; mandatoryBalance: number }[];
+  mandatoryPapoAmount?: number;
   periodicPapo: MemberAmount[];
   interest: LoanInterest[];
   loans: (Debt & { totalRepayable: number })[];
@@ -45,37 +46,44 @@ export function calculateShareOut(input: ShareOutInput) {
   const grossPool = papoPool + lateLoan + paidFines;
   const pool = Math.max(0, grossPool - expenses);
   const members = [...input.members].sort((left, right) => left.userId.localeCompare(right.userId));
-  const memberCount = members.length;
+  const memberCount = members.filter(member => member.isActive !== false).length;
   const baseDividend = memberCount ? Math.floor(pool / memberCount) : 0;
   const extraCents = memberCount ? pool % memberCount : 0;
-  const membersPayout = members.map((member, index) => {
+  let dividendIndex = 0;
+  const membersPayout = members.map(member => {
     const myShares = input.shares.filter(row => row.userId === member.userId);
     const capital = sumMoney(myShares.map(row => row.amountPaid));
     const social = sumMoney(myShares.map(row => row.socialFundPaid));
     const mandatory = sumMoney(input.papoAccounts.filter(row => row.userId === member.userId).map(row => row.mandatoryBalance));
+    const mandatoryDebt = member.isActive === false ? mandatory : (mandatory || money(input.mandatoryPapoAmount ?? 0));
     const timely = timelyByUser.get(member.userId) ?? 0;
     const papoPaid = papoByUser.get(member.userId) ?? 0;
     const papoRefund = Math.floor(papoPaid / 2);
-    const dividend = baseDividend + (index < extraCents ? 1 : 0);
+    const dividend = member.isActive === false ? 0 : baseDividend + (dividendIndex++ < extraCents ? 1 : 0);
     const debt = sumMoney([
       ...input.loans.filter(row => row.userId === member.userId && ['DISBURSED','OVERDUE','REPAYMENT_PENDING'].includes(row.status)).map(row => row.totalRepayable - row.amountPaid),
       ...input.topUps.filter(row => row.userId === member.userId && ['ACTIVE','OVERDUE','REPAYMENT_PENDING'].includes(row.status)).map(row => row.totalPayable - row.amountPaid),
       ...input.unpaidFines.filter(row => row.userId === member.userId).map(row => row.amount),
     ]);
-    const gross = capital + social + mandatory + timely + papoRefund + dividend;
+    const gross = capital + social + mandatoryDebt + timely + papoRefund + dividend;
+    const net = Math.max(0, gross - mandatoryDebt - debt);
     return {
       ...member,
       mySharesCount: myShares.reduce((sum, row) => sum + row.sharesCount, 0),
       myCapital: capital / 100,
       mySocialFund: social / 100,
-      myPapoMandatory: mandatory / 100,
+      myPapoMandatory: mandatoryDebt / 100,
+      myPapoMandatoryDebt: mandatoryDebt / 100,
+      otherDeductions: debt / 100,
+      balanceToCollect: Math.max(0, debt - (gross - mandatoryDebt)) / 100,
       myOnTimeLoanInterest: timely / 100,
       myPapoInterestPaid: papoPaid / 100,
       myPapoInterestRefund: papoRefund / 100,
       estimatedProfitDividend: dividend / 100,
-      totalDeductions: debt / 100,
+      totalDeductions: (debt + mandatoryDebt) / 100,
       grossPayout: gross / 100,
-      netPayout: Math.max(0, gross - debt) / 100,
+      netPayout: net / 100,
+      payoutAfterPapoRepayment: (net + mandatoryDebt) / 100,
     };
   });
 

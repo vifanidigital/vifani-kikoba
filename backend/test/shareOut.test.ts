@@ -45,6 +45,24 @@ test('personal contributions and timely interest return to their owner while gro
   assert.equal(a.mySocialFund, 20);
   assert.equal(a.myPapoInterestRefund, 5);
   assert.equal(b.myPapoInterestRefund, 2);
-  assert.equal(a.netPayout, 132.01);
+  assert.equal(a.myPapoMandatoryDebt, 5);
+  assert.equal(a.netPayout, 127.01);
   assert.equal(b.netPayout, 23);
+});
+
+test('mandatory Papo remains personal and must be returned at closure without increasing net cash', () => {
+  const result = calculateShareOut({
+    members: [{ userId: 'a', fullName: 'A' }, { userId: 'b', fullName: 'B', isActive: false }],
+    shares: [], papoAccounts: [{ userId: 'b', mandatoryBalance: 70 }],
+    mandatoryPapoAmount: 50, periodicPapo: [], interest: [], loans: [], topUps: [],
+    unpaidFines: [], paidFines: 10, expenses: 0,
+  });
+  const [active, suspended] = result.membersPayout;
+  assert.equal(active.myPapoMandatoryDebt, 50);
+  assert.equal(active.myPapoMandatory, 50);
+  assert.equal(active.netPayout, 10);
+  assert.equal(active.payoutAfterPapoRepayment, 60);
+  assert.equal(suspended.myPapoMandatoryDebt, 70);
+  assert.equal(suspended.estimatedProfitDividend, 0);
+  assert.equal(result.distributableProfitPool, 10);
 });
