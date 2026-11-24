@@ -40,11 +40,48 @@ router.get('/', (_req, res) => {
   res.type('html').send(adminPage);
 });
 
+function groupFilters(now: Date) {
+  const notSuspended = { subscriptionStatus: { not: 'SUSPENDED' as const } };
+  const notPaid = [{ paidUntil: null }, { paidUntil: { lte: now } }];
+  const soon = new Date(now.getTime() + 7 * 86400000);
+  return {
+    ACTIVE: { ...notSuspended, paidUntil: { gt: now } },
+    TRIAL: { ...notSuspended, trialEndsAt: { gt: now }, OR: notPaid },
+    EXPIRED: { ...notSuspended, trialEndsAt: { lte: now }, OR: notPaid },
+    SUSPENDED: { subscriptionStatus: 'SUSPENDED' },
+    EXPIRING: { ...notSuspended, OR: [
+      { paidUntil: { gt: now, lte: soon } },
+      { trialEndsAt: { gt: now, lte: soon }, OR: notPaid },
+    ] },
+  } satisfies Record<string, Prisma.GroupWhereInput>;
+}
+
+router.get('/overview', async (_req, res) => {
+  const filters = groupFilters(new Date());
+  const [total, active, trial, expiring, expired, suspended, payments] = await prisma.$transaction([
+    prisma.group.count(),
+    prisma.group.count({ where: filters.ACTIVE }),
+    prisma.group.count({ where: filters.TRIAL }),
+    prisma.group.count({ where: filters.EXPIRING }),
+    prisma.group.count({ where: filters.EXPIRED }),
+    prisma.group.count({ where: filters.SUSPENDED }),
+    prisma.subscriptionPayment.aggregate({ _sum: { amount: true }, _count: true }),
+  ]);
+  res.json({ total, active, trial, expiring, expired, suspended, amount: payments._sum.amount ?? 0, paymentCount: payments._count, monthlyPrice: MONTHLY_PRICE });
+});
+
 router.get('/groups', async (req, res) => {
   const query = String(req.query.q ?? '').trim().slice(0, 120);
   const page = Math.max(1, Math.min(10000, Number(req.query.page) || 1));
   if (!Number.isInteger(page)) return res.sendStatus(400);
-  const where = { name: { contains: query, mode: 'insensitive' as const } };
+  const now = new Date();
+  const filters = groupFilters(now);
+  const status = z.enum(['ACTIVE', 'TRIAL', 'EXPIRED', 'SUSPENDED', 'EXPIRING']).optional().safeParse(req.query.status);
+  if (!status.success) return res.status(400).json({ error: 'Chagua hali halali ya kikundi.' });
+  const where: Prisma.GroupWhereInput = { AND: [
+    ...(query ? [{ OR: [{ name: { contains: query, mode: 'insensitive' as const } }, { id: query }] }] : []),
+    ...(status.data ? [filters[status.data]] : []),
+  ] };
   const [groups, total] = await prisma.$transaction([
     prisma.group.findMany({
       where, skip: (page - 1) * 30, take: 30, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -52,7 +89,7 @@ router.get('/groups', async (req, res) => {
     }),
     prisma.group.count({ where }),
   ]);
-  res.json({ total, page, groups: groups.map(group => ({ ...group, access: subscriptionAccess(group) })) });
+  res.json({ total, page, groups: groups.map(group => ({ ...group, access: subscriptionAccess(group, now) })) });
 });
 
 router.get('/groups/:id/payments', async (req, res) => {
@@ -98,6 +135,11 @@ router.patch('/groups/:id/status', async (req, res) => {
   });
   if (!updated.count) return res.status(404).json({ error: 'Kikundi hakipo.' });
   res.json({ message: 'Hali ya kikundi imesasishwa.' });
+});
+
+router.use((error: unknown, _req: unknown, res: import('express').Response, _next: import('express').NextFunction) => {
+  console.error('Admin request failed', error instanceof Prisma.PrismaClientKnownRequestError ? error.code : error instanceof Error ? error.name : 'Unknown');
+  res.status(500).json({ error: 'Seva imeshindwa kupakia taarifa. Jaribu tena.' });
 });
 
 export default router;
