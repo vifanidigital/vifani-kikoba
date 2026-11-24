@@ -1,3 +1,4 @@
+import HistoricalEvents from './HistoricalEvents';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { isAxiosError } from 'axios';
@@ -9,6 +10,7 @@ type Schedule = { startDate: string | null; weekday: number; dates: string[] };
 type Member = {
   userId: string;
   fullName: string;
+  isActive?: boolean;
   record: { sharesCount: number; amountPaid: number; socialFundPaid: number } | null;
 };
 type Session = { members: Member[]; hasPapo: boolean };
@@ -143,9 +145,10 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
           {session && (
             <View className="mt-4">
               <Text className={'mb-2 font-bold ' + textColor}>Kikao cha {picked}</Text>
+              <HistoricalEvents key={picked} date={picked} members={session.members} hasPapo={session.hasPapo} refresh={refresh} />
               {session.members.map(member => (
                 <View key={member.userId} className="mb-2 rounded-xl border border-slate-400 p-3">
-                  <Text className={'font-bold ' + textColor}>{member.fullName}</Text>
+                  <Text className={'font-bold ' + textColor}>{member.fullName}{member.isActive === false ? ' (si hai)' : ''}</Text>
                   {member.record ? (
                     <Text className={'mt-1 text-sm ' + textColor}>Imehifadhiwa · Hisa {member.record.sharesCount} · Hisa TZS {member.record.amountPaid.toLocaleString()} · Jamii TZS {member.record.socialFundPaid.toLocaleString()}</Text>
                   ) : memberId === member.userId ? (

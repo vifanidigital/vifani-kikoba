@@ -109,6 +109,14 @@ router.post('/add', authenticateToken, async (req: AuthRequest, res: Response) =
       const existing = await tx.groupMember.findUnique({ where: { groupId_userId: { groupId, userId: member.id } } });
       if (existing) return existing.isActive ? 'ACTIVE_MEMBER' : 'SUSPENDED_MEMBER';
       await tx.groupMember.create({ data: { groupId, userId: member.id } });
+      const settings = await tx.group.findUniqueOrThrow({ where: { id: groupId }, select: { hasPapo: true, mandatoryPapoAmount: true } });
+      if (settings.hasPapo && settings.mandatoryPapoAmount > 0) {
+        await tx.papoAccount.upsert({
+          where: { userId_groupId: { userId: member.id, groupId } },
+          create: { groupId, userId: member.id, mandatoryBalance: settings.mandatoryPapoAmount },
+          update: {},
+        });
+      }
       return existingAccount ? 'EXISTING_ACCOUNT' : 'CREATED';
     }, { isolationLevel: 'Serializable' });
     if (result === 'PIN_REQUIRED') return res.status(400).json({ error: 'Akaunti mpya inahitaji PIN ya awali.' });

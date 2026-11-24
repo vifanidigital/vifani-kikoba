@@ -26,6 +26,11 @@ async function saveGroupChange(
 ) {
   return prisma.$transaction(async (tx) => {
     const updated = await tx.group.update({ where: { id: groupId }, data });
+    if (updated.hasPapo && (data.hasPapo !== undefined || data.mandatoryPapoAmount !== undefined)) {
+      const members = await tx.groupMember.findMany({ where: { groupId, isActive: true }, select: { userId: true } });
+      await tx.papoAccount.createMany({ data: members.map(({ userId }) => ({ groupId, userId, mandatoryBalance: updated.mandatoryPapoAmount })), skipDuplicates: true });
+      await tx.papoAccount.updateMany({ where: { groupId, userId: { in: members.map(member => member.userId) } }, data: { mandatoryBalance: updated.mandatoryPapoAmount } });
+    }
     const actor = await tx.user.findUnique({ where: { id: userId }, select: { fullName: true } });
     await tx.ruleChangeLog.create({
       data: { groupId, changedBy: actor?.fullName || 'Mwenyekiti', summary },
@@ -167,6 +172,9 @@ router.put('/settings', authenticateToken, async (req: AuthRequest, res: Respons
     }
 
     const b = req.body;
+    if (b.mandatoryPapoAmount !== undefined && (!Number.isFinite(Number(b.mandatoryPapoAmount)) || Number(b.mandatoryPapoAmount) < 0)) {
+      return res.status(400).json({ error: 'Weka kiwango halali cha Papo ya lazima.' });
+    }
     const updated = await saveGroupChange(groupId, userId, {
       name: b.name !== undefined ? String(b.name) : undefined,
       meetingDayOfWeek: b.meetingDayOfWeek !== undefined ? Number(b.meetingDayOfWeek) : undefined,

@@ -1,3 +1,6 @@
+import { currentLoanQuote } from '../lib/loanRepayment';
+import { HistoricalConflict, historicalEventInput, historicalTypes, saveHistoricalEvent } from '../lib/historicalEvents';
+import { lockLoanGroup } from './loanQueue';
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -60,15 +63,58 @@ router.get('/:date', async (req: AuthRequest, res) => {
   const group = await prisma.group.findUnique({ where: { id: groupId }, select: groupFields });
   if (!group || !date || !isScheduled(date, group)) return res.status(400).json({ error: 'Tarehe hiyo haipo kwenye ratiba ya nyuma.' });
   const members = await prisma.groupMember.findMany({
-    where: { groupId, isActive: true },
-    select: { userId: true, user: { select: { fullName: true } } }, orderBy: { joinedAt: 'asc' },
+    where: { groupId },
+    select: { userId: true, isActive: true, user: { select: { fullName: true } } }, orderBy: { joinedAt: 'asc' },
   });
   const records = await prisma.shareRecord.findMany({
     where: { groupId, meetingDate: { gte: date, lt: meetingDayEnd(date) } },
     select: { userId: true, sharesCount: true, amountPaid: true, socialFundPaid: true },
   });
   const byMember = new Map(records.map(entry => [entry.userId, entry]));
-  res.json({ hasPapo: group.hasPapo, members: members.map(member => ({ userId: member.userId, fullName: member.user.fullName, record: byMember.get(member.userId) ?? null })) });
+  res.json({ hasPapo: group.hasPapo, members: members.map(member => ({ userId: member.userId, fullName: member.user.fullName, isActive: member.isActive, record: byMember.get(member.userId) ?? null })) });
+});
+
+router.get('/:date/events', async (req: AuthRequest, res) => {
+  const date = parseMeetingDate(String(req.params.date));
+  const groupId = req.user!.groupId;
+  const group = await prisma.group.findUnique({ where: { id: groupId }, select: groupFields });
+  if (!group || !date || !isScheduled(date, group)) return res.status(400).json({ error: 'Tarehe haipo kwenye ratiba.' });
+  const [loans, papo, fines, events] = await Promise.all([
+    prisma.loan.findMany({ where: { groupId, disbursedAt: { lte: date }, status: { in: ['DISBURSED','OVERDUE'] } }, select: { id: true, userId: true, principalAmount: true, amountPaid: true, totalRepayable: true, disbursedAt: true, repaymentPlan: true } }),
+    prisma.papoTopUp.findMany({ where: { groupId, createdAt: { lte: date }, status: { in: ['ACTIVE','OVERDUE'] } }, select: { id: true, userId: true, principalAmount: true, amountPaid: true, totalPayable: true } }),
+    prisma.fineRecord.findMany({ where: { groupId, createdAt: { lte: date }, isPaid: false }, select: { id: true, userId: true, reason: true, amount: true } }),
+    prisma.transaction.findMany({ where: { groupId, createdAt: { gte: date, lt: meetingDayEnd(date) }, type: { in: [...historicalTypes] } }, select: { id: true, userId: true, type: true, amount: true, notes: true } }),
+  ]);
+  res.json({
+    loans: loans.map(loan => {
+      const quote = currentLoanQuote(loan, date);
+      return { id: loan.id, userId: loan.userId, principalAmount: loan.principalAmount,
+        balance: quote?.dueBalance ?? Math.max(0, loan.totalRepayable - loan.amountPaid),
+        first: quote?.firstInterest ?? 0, second: quote?.secondInterest ?? 0, secondRequired: quote?.secondRequired ?? false };
+    }),
+    papo: papo.map(entry => ({ ...entry, balance: Math.max(0, entry.totalPayable - entry.amountPaid) })),
+    fines, events,
+  });
+});
+
+router.post('/:date/events', async (req: AuthRequest, res) => {
+  const date = parseMeetingDate(String(req.params.date));
+  const input = historicalEventInput.safeParse(req.body);
+  if (!date || !input.success) return res.status(400).json({ error: 'Weka tukio, mwanachama, kiasi na rejea ya daftari.' });
+  const groupId = req.user!.groupId;
+  try {
+    await prisma.$transaction(async tx => {
+      await lockLoanGroup(tx, groupId);
+      const group = await tx.group.findUnique({ where: { id: groupId }, select: { ...groupFields, cycleClosedAt: true } });
+      if (!group || group.cycleClosedAt || !isScheduled(date, group)) throw new HistoricalConflict('Kikao hiki hakipo wazi kwa taarifa za nyuma.');
+      await saveHistoricalEvent(tx, groupId, date, input.data);
+    }, { timeout: 25000 });
+    res.status(201).json({ message: 'Tukio limehifadhiwa kwa tarehe halisi ya kikao.' });
+  } catch (error) {
+    if (error instanceof HistoricalConflict) return res.status(409).json({ error: error.message });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return res.status(409).json({ error: 'Rejea hiyo tayari imetumika.' });
+    throw error;
+  }
 });
 
 const money = z.number().min(0).max(1_000_000_000);
@@ -91,7 +137,7 @@ router.post('/:date', async (req: AuthRequest, res) => {
       if (!group || !isScheduled(date, group)) return 'DATE';
       if (papoInterestPaid > 0 && !group.hasPapo) return 'PAPO';
       const membership = await tx.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } }, select: { isActive: true } });
-      if (!membership?.isActive) return 'MEMBER';
+      if (!membership) return 'MEMBER';
       const window = { gte: date, lt: meetingDayEnd(date) };
       const existing = await tx.shareRecord.findFirst({ where: { groupId, userId, meetingDate: window } });
       if (existing) return 'EXISTS';
@@ -110,7 +156,7 @@ router.post('/:date', async (req: AuthRequest, res) => {
     }, { isolationLevel: 'Serializable' });
     if (outcome === 'DATE') return res.status(400).json({ error: 'Tarehe hiyo haipo kwenye ratiba ya nyuma.' });
     if (outcome === 'PAPO') return res.status(400).json({ error: 'Huduma ya Papo haijawashwa kwa kikundi hiki.' });
-    if (outcome === 'MEMBER') return res.status(409).json({ error: 'Mwanachama huyu si hai katika kikundi.' });
+    if (outcome === 'MEMBER') return res.status(409).json({ error: 'Mwanachama huyu hayupo katika kikundi.' });
     if (outcome === 'EXISTS') return res.status(409).json({ error: 'Kikao kina rekodi zilizopo kwa mwanachama huyu. Kagua daftari kabla ya kuongeza nyingine.' });
     res.status(201).json({ message: 'Rekodi ya kikao cha nyuma imehifadhiwa.' });
   } catch (error) {

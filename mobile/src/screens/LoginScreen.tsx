@@ -15,7 +15,7 @@ import {
   Platform,
   Animated,
   LayoutAnimation,
-  UIManager } from 'react-native';
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Application from 'expo-application';
@@ -24,10 +24,6 @@ import { Ionicons, FontAwesome5, FontAwesome6 } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
 import { isAxiosError } from 'axios';
 import { useAuth } from '../context/AuthContext';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();

@@ -15,17 +15,13 @@ import {
   Animated,
   LayoutAnimation,
   Platform,
-  UIManager } from 'react-native';
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { getCachedData, setCachedData } from '../utils/cache';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export default function KikaoAkibaScreen() {
   const insets = useSafeAreaInsets();

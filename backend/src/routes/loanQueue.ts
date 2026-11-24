@@ -59,7 +59,7 @@ router.post('/spin', async (req: AuthRequest, res) => {
   await prisma.$transaction(async tx => {
     await lockLoanGroup(tx, groupId);
     const { state, active, closed } = await queueData(tx, groupId);
-    if (state || closed || !active.length) throw new LoanConflict('Spin inaruhusiwa mara moja kwa kikundi kilicho hai.');
+    if (state || closed || !active.length) throw new LoanConflict('Spin inaruhusiwa mara moja kwa mzunguko ulio wazi.');
     for (let i = active.length - 1; i > 0; i--) {
       const j = randomInt(i + 1);
       [active[i], active[j]] = [active[j], active[i]];

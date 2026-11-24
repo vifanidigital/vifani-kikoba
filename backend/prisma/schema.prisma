@@ -172,6 +172,7 @@ model PapoAccount {
 }
 
 model PapoTopUp {
+  repaymentRequest Json?
   fundedAmount Float?
   feedback String?
   id              String    @id @default(uuid())

@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
+import { papoPayment, outstandingPapoPrincipal } from '../lib/papoPayment';
 import { fundingInput, fundingOrder, fundingEntry, recordFunding } from '../lib/loanFunding';
 import { lockLoanGroup, LoanConflict } from './loanQueue';
 import { z } from 'zod';
@@ -35,14 +38,14 @@ router.get('/status', authenticateToken, async (req: AuthRequest, res: Response)
 
     if (!group) return res.status(404).json({ error: 'Kikoba hakijapatikana.' });
 
-    const mandatoryBalance = papoAcc?.mandatoryBalance || 0;
+    const mandatoryBalance = group.hasPapo ? (papoAcc?.mandatoryBalance || group.mandatoryPapoAmount) : 0;
     const rate = group.papoMeetingInterest || 0;
 
     // Hesabu ya Papo zote za hiari zilizo ACTIVE au zinazosubiri uhakiki wa marejesho
     const activeList = myTopUps.filter((t) => t.status === 'ACTIVE' || t.status === 'OVERDUE' || t.status === 'REPAYMENT_PENDING');
-    const activeTopUpPrincipal = activeList.reduce((s, t) => s + t.principalAmount, 0);
+    const activeTopUpPrincipal = activeList.reduce((s, t) => s + outstandingPapoPrincipal(t), 0);
     const activeTopUpTotalInterest = activeList.reduce(
-      (s, t) => s + Math.round((t.principalAmount * rate) / 100),
+      (s, t) => s + Math.round((outstandingPapoPrincipal(t) * rate) / 100),
       0
     );
 
@@ -61,7 +64,7 @@ router.get('/status', authenticateToken, async (req: AuthRequest, res: Response)
       const weeksLeft = t.dueDate
         ? Math.max(0, Math.ceil((new Date(t.dueDate).getTime() - now) / msPerWeek))
         : group.topUpPapoWeeks;
-      const interestPerMeeting = Math.round((t.principalAmount * rate) / 100);
+      const interestPerMeeting = Math.round((outstandingPapoPrincipal(t) * rate) / 100);
       return {
         ...t,
         weeksRemaining: weeksLeft,
@@ -113,7 +116,7 @@ router.post('/request-topup', authenticateToken, async (req: AuthRequest, res: R
       });
     }
 
-    const currentUsed = activeTopUps.reduce((s, t) => s + t.principalAmount, 0);
+    const currentUsed = activeTopUps.reduce((s, t) => s + (t.status === 'PENDING' ? t.principalAmount : outstandingPapoPrincipal(t)), 0);
     const remainingCap = Math.max(0, group.maxTopUpPapoCap - currentUsed);
 
     if (amount > remainingCap) {
@@ -175,70 +178,43 @@ router.post('/approve-topup/:id', authenticateToken, async (req: AuthRequest, re
 
 // 4. MWANACHAMA KUOMBA KUREJESHA PAPO YA HIARI (ATA KABLA YA SIKU KUFIKA)
 router.post('/request-repay-topup/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    const { userId, groupId } = req.user!;
-    const id = String(req.params.id);
-
-    const topUp = await prisma.papoTopUp.findUnique({ where: { id } });
-    if (!topUp || topUp.groupId !== groupId || topUp.userId !== userId) {
-      return res.status(404).json({ error: 'Rekodi ya Papo haijapatikana.' });
-    }
-
-    const requested = await prisma.papoTopUp.updateMany({
-      where: { id, groupId, userId, status: { in: ['ACTIVE', 'OVERDUE'] } },
-      data: { status: 'REPAYMENT_PENDING', feedback: null },
-    });
-    if (!requested.count) return res.status(409).json({ error: 'Papo hii haiwezi kuombewa marejesho kwa sasa.' });
-
-    res.json({ message: 'Ombi la kurejesha Papo ya hiari limetumwa kwa kiongozi kuthibitisha!' });
-  } catch {
-    res.status(500).json({ error: 'Imeshindikana kutuma ombi la marejesho.' });
-  }
+  const { userId, groupId } = req.user!;
+  const id = String(req.params.id);
+  const entry = await prisma.papoTopUp.findFirst({ where: { id, groupId, userId } });
+  if (!entry) return res.status(404).json({ error: 'Rekodi ya Papo haijapatikana.' });
+  const amount = req.body?.amount ?? Math.round((entry.totalPayable - entry.amountPaid) * 100) / 100;
+  if (typeof amount !== 'number' || !papoPayment(entry, amount)) return res.status(400).json({ error: 'Weka kiasi kisichozidi salio la Papo.' });
+  const result = await prisma.papoTopUp.updateMany({
+    where: { id, groupId, userId, status: { in: ['ACTIVE', 'OVERDUE'] }, amountPaid: entry.amountPaid },
+    data: { status: 'REPAYMENT_PENDING', feedback: null, repaymentRequest: { id: randomUUID(), amount } },
+  });
+  if (!result.count) return res.status(409).json({ error: 'Ombi hili tayari limebadilika.' });
+  res.status(201).json({ message: 'Ombi la marejesho ya Papo limetumwa.' });
 });
 
-// 5. KIONGOZI KUTHIBITISHA MAREJESHO YA PAPO YA HIARI (INAFUTIKA KWENYE MADENI)
 router.post('/confirm-repay-topup/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    const { groupId, role } = req.user!;
-    if (!LEADER_ROLES.includes(role)) {
-      return res.status(403).json({ error: 'Viongozi pekee ndio wanaweza kuthibitisha marejesho.' });
-    }
-
-    const id = String(req.params.id);
-    const topUp = await prisma.papoTopUp.findUnique({ where: { id } });
-    if (!topUp || topUp.groupId !== groupId) {
-      return res.status(404).json({ error: 'Rekodi haijapatikana.' });
-    }
-
-    const recorded = await prisma.$transaction(async (tx) => {
-      const updated = await tx.papoTopUp.updateMany({
-        where: { id, groupId, status: 'REPAYMENT_PENDING', amountPaid: topUp.amountPaid },
-        data: {
-          status: 'PAID',
-          feedback: null,
-          amountPaid: topUp.totalPayable,
-        },
-      });
-
-      if (!updated.count) return false;
-      const principalRemaining = Math.max(0, topUp.principalAmount - Math.max(0, topUp.amountPaid - (topUp.totalPayable - topUp.principalAmount)));
-      if (principalRemaining > 0) await tx.transaction.create({
-        data: {
-          groupId,
-          userId: topUp.userId,
-          type: 'PAPO_TOPUP_REPAYMENT',
-          amount: principalRemaining,
-          notes: 'Marejesho ya mtaji wa Papo ya hiari',
-        },
-      });
-      return true;
+  const { groupId, role } = req.user!;
+  if (!LEADER_ROLES.includes(role)) return res.status(403).json({ error: 'Viongozi pekee wanaweza kuthibitisha marejesho.' });
+  const id = String(req.params.id);
+  await prisma.$transaction(async tx => {
+    await lockLoanGroup(tx, groupId);
+    const entry = await tx.papoTopUp.findFirst({ where: { id, groupId, status: 'REPAYMENT_PENDING' } });
+    if (!entry) throw new LoanConflict('Hakuna ombi linalosubiri uthibitisho.');
+    const request = entry.repaymentRequest as { id: string; amount: number } | null;
+    if (request && request.id !== req.body?.requestId) throw new LoanConflict('Ombi limebadilika. Pakia tena kwanza.');
+    const amount = request?.amount ?? Math.round((entry.totalPayable - entry.amountPaid) * 100) / 100;
+    const payment = papoPayment(entry, amount);
+    if (!payment) throw new LoanConflict('Kiasi cha ombi si halali.');
+    const result = await tx.papoTopUp.updateMany({
+      where: { id, status: 'REPAYMENT_PENDING', amountPaid: entry.amountPaid },
+      data: { amountPaid: payment.totalPaid, repaymentRequest: Prisma.DbNull, feedback: 'Marejesho yamethibitishwa.',
+        status: payment.remaining === 0 ? 'PAID' : entry.dueDate && entry.dueDate < new Date() ? 'OVERDUE' : 'ACTIVE' },
     });
-    if (!recorded) return res.status(409).json({ error: 'Papo hii haisubiri uthibitisho wa marejesho.' });
-
-    res.json({ message: 'Marejesho ya Papo ya hiari yamethibitishwa na kufutwa kwenye madeni!' });
-  } catch {
-    res.status(500).json({ error: 'Imeshindikana kuthibitisha marejesho.' });
-  }
+    if (!result.count) throw new LoanConflict('Ombi tayari limebadilika.');
+    if (payment.principal > 0) await tx.transaction.create({ data: { groupId, userId: entry.userId, type: 'PAPO_TOPUP_REPAYMENT', amount: payment.principal, notes: id } });
+    if (payment.interest > 0) await tx.transaction.create({ data: { groupId, userId: entry.userId, type: 'PAPO_TOPUP_INTEREST_REPAYMENT', amount: payment.interest, notes: id } });
+  });
+  res.json({ message: 'Marejesho yamethibitishwa na salio la Papo limesasishwa.' });
 });
 
 router.post('/decline/:id/:stage', authenticateToken, async (req: AuthRequest, res) => {
@@ -250,10 +226,16 @@ router.post('/decline/:id/:stage', authenticateToken, async (req: AuthRequest, r
   const repayment = input.data.stage === 'repayment';
   const result = await prisma.papoTopUp.updateMany({
     where: { id: String(req.params.id), groupId, status: repayment ? 'REPAYMENT_PENDING' : 'PENDING', ...(repayment ? {} : { OR: [{ fundedAmount: null }, { fundedAmount: 0 }] }) },
-    data: { status: repayment ? 'ACTIVE' : 'REJECTED', feedback: input.data.reason },
+    data: { status: repayment ? 'ACTIVE' : 'REJECTED', feedback: input.data.reason, repaymentRequest: Prisma.DbNull },
   });
   if (!result.count) return res.status(409).json({ error: 'Ombi hili halisubiri uamuzi.' });
   res.json({ message: 'Ombi limekataliwa na sababu inaonekana kwa mwanachama.' });
+});
+
+router.use((error: unknown, _req: AuthRequest, res: Response, _next: import('express').NextFunction) => {
+  if (error instanceof LoanConflict) return res.status(409).json({ error: error.message });
+  console.error('Papo workflow failed', error instanceof Error ? error.name : 'Unknown');
+  res.status(500).json({ error: 'Ombi la Papo halijakamilika.' });
 });
 
 export default router;

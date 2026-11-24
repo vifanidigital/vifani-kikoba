@@ -1,3 +1,4 @@
+import { outstandingPapoPrincipal } from '../lib/papoPayment';
 import { currentLoanQuote, RepaymentPlan } from '../lib/loanRepayment';
 import historicalMeetings from './historicalMeetings';
 import { localDate, parseMeetingDate } from '../lib/meetingCalendar';
@@ -111,6 +112,7 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
     const tSocial = todayShares._sum.socialFundPaid || 0;
     const tPapoInterest = todayTransactions.filter((tx) => tx.type === 'PAPO_INTEREST').reduce((s, tx) => s + tx.amount, 0);
     const tTopUpRepaid = todayTransactions.filter((tx) => tx.type === 'PAPO_TOPUP_REPAYMENT').reduce((s, tx) => s + tx.amount, 0);
+    const tPapoTopUpInterestRepaid = todayTransactions.filter(row => row.type === 'PAPO_TOPUP_INTEREST_REPAYMENT').reduce((sum, row) => sum + row.amount, 0);
     const tLoanInterestRepaid = todayTransactions.filter((tx) => tx.type === 'LOAN_INTEREST_REPAYMENT').reduce((s, tx) => s + tx.amount, 0);
     const tLoanPrincipalRepaid = todayTransactions.filter((tx) => tx.type === 'LOAN_REPAYMENT').reduce((s, tx) => s + tx.amount, 0);
     const tPaidFines = todayPaidFines._sum.amount || 0;
@@ -120,7 +122,7 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
     const tPapoLentToday = (todayTopUpsDisbursed._sum.principalAmount ?? 0) + todayTransactions.filter(row => row.type === 'PAPO_TOPUP_DISBURSEMENT').reduce((sum, row) => sum + row.amount, 0);
     const tExpensesToday = todayExpensesAgg._sum.amount || 0;
 
-    const tTotalIn = tShares + tSocial + tPapoInterest + tTopUpRepaid + tLoanInterestRepaid + tLoanPrincipalRepaid + tPaidFines;
+    const tTotalIn = tShares + tSocial + tPapoInterest + tTopUpRepaid + tPapoTopUpInterestRepaid + tLoanInterestRepaid + tLoanPrincipalRepaid + tPaidFines;
     const tTotalOut = tLoansLentToday + tPapoLentToday + tExpensesToday;
 
     const totalGroupBalance = Math.max(
@@ -160,7 +162,7 @@ router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response
       },
       todaySummary: {
         sharesCollected: tShares,
-        papoCollected: tPapoInterest,
+        papoCollected: tPapoInterest + tPapoTopUpInterestRepaid,
         socialCollected: tSocial,
         topUpRepaid: tTopUpRepaid,
         loanInterestRepaid: tLoanInterestRepaid,
@@ -240,8 +242,8 @@ router.get('/session-data', authenticateToken, async (req: AuthRequest, res: Res
     const formattedMembers = membersList.map((m) => {
       const mId = m.user.id;
       const papoAcc = allPapoAccs.find((p) => p.userId === mId);
-      const mandatoryBal = papoAcc?.mandatoryBalance || 0;
-      const activeTopUpBal = activeTopUps.filter((t) => t.userId === mId).reduce((s, t) => s + t.principalAmount, 0);
+      const mandatoryBal = group.hasPapo ? (papoAcc?.mandatoryBalance || group.mandatoryPapoAmount) : 0;
+      const activeTopUpBal = activeTopUps.filter((t) => t.userId === mId).reduce((s, t) => s + outstandingPapoPrincipal(t), 0);
       const totalPapoInterestDue = group.hasPapo ? Math.round(((mandatoryBal + activeTopUpBal) * (group.papoMeetingInterest || 0)) / 100) : 0;
 
       const userTodayShare = todayShares.find((s) => s.userId === mId);
@@ -286,7 +288,7 @@ router.get('/session-data', authenticateToken, async (req: AuthRequest, res: Res
         shares: myShares,
         fines: myFines,
         papoInterestTxs: myPapoTxs,
-        papoMandatoryBalance: myPapo?.mandatoryBalance || 0,
+        papoMandatoryBalance: group.hasPapo ? (myPapo?.mandatoryBalance || group.mandatoryPapoAmount) : 0,
       },
       members: formattedMembers,
     });

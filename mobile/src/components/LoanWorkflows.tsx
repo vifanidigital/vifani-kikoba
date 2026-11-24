@@ -1,5 +1,6 @@
 import { ReactNode, useState } from 'react';
-import { Alert, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Easing, Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { isAxiosError } from 'axios';
 import { apiClient } from '../api/client';
 import { FormTextInput } from './KeyboardForm';
@@ -49,16 +50,35 @@ export function LoanQueuePanel({ data, userId, chair, reload, error: loadError }
 }) {
   const { busy, error, run } = useLoanAction(reload);
   const [choose, setChoose] = useState(false);
+  const [rotation] = useState(() => new Animated.Value(0));
+  const rotate = rotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '1080deg'] });
+  const spin = () => {
+    rotation.setValue(0);
+    void run(async () => {
+      const animation = new Promise<void>(resolve => Animated.timing(rotation, {
+        toValue: 1, duration: 1100, easing: Easing.out(Easing.cubic), useNativeDriver: true,
+      }).start(() => resolve()));
+      try { return await apiClient.post('/loans/queue/spin'); }
+      finally { await animation; }
+    });
+  };
   const labels: Record<string, string> = { PENDING: 'Linasubiri jibu', ACCEPTED: 'Limekubaliwa', REJECTED: 'Limekataliwa', CANCELLED: 'Limefungwa' };
   const hasPending = data?.swaps.some(row => row.status === 'PENDING');
   return <View className="mb-4 rounded-2xl bg-slate-900 p-4">
     <Text className="text-base font-bold text-white">Foleni ya mkopo mkubwa</Text>
     {loadError ? <><Text className="text-rose-200">{loadError}</Text><Action label="Pakia foleni tena" onPress={() => void reload()} /></> : null}
     {data?.spun === false && <>
-      <Text className="text-slate-200">Spin hufanyika mara moja. Itapanga wanachama hai kutoka wa kwanza hadi wa mwisho.</Text>
-      {chair && <Action label="Spin" disabled={busy} onPress={() => Alert.alert('Panga foleni?', 'Mpangilio huu utatumika kwa zamu za mkopo mkubwa.', [
-        { text: 'Ghairi', style: 'cancel' }, { text: 'Spin', onPress: () => void run(() => apiClient.post('/loans/queue/spin')) },
-      ])} />}
+      <Text className="text-slate-200">Spin hufanyika mara moja kwa kila mzunguko. Itapanga wanachama hai kutoka wa kwanza hadi wa mwisho.</Text>
+      {chair && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Spin foleni ya mkopo" disabled={busy}
+        className="mt-4 flex-row items-center gap-4 rounded-2xl border border-emerald-300 bg-emerald-400 p-4"
+        onPress={() => Alert.alert('Panga foleni?', 'Mpangilio huu utatumika kwa zamu za mkopo mkubwa.', [
+          { text: 'Ghairi', style: 'cancel' }, { text: 'Spin', onPress: spin },
+        ])}>
+        <Animated.View style={{ transform: [{ rotate }] }} className="rounded-full bg-emerald-950 p-3">
+          <Ionicons name="shuffle" size={24} color="#ffffff" />
+        </Animated.View>
+        <Text className="flex-1 text-lg font-extrabold text-emerald-950">{busy ? 'Inapanga foleni...' : 'Spin foleni ya mkopo'}</Text>
+      </TouchableOpacity>}
     </>}
     {data?.spun && <>
       {data.positions.map(member => <Text key={member.id} className={'py-1 ' + (member.id === data.next ? 'font-bold text-teal-300' : 'text-slate-200')}>

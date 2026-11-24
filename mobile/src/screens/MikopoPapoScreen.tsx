@@ -33,6 +33,8 @@ export default function MikopoPapoScreen() {
 
   const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState('');
+  const [topUpRepayId, setTopUpRepayId] = useState('');
+  const [topUpRepayAmount, setTopUpRepayAmount] = useState('');
 
   const [showLoanModal, setShowLoanModal] = useState(false);
   const [loanAmount, setLoanAmount] = useState('');
@@ -95,19 +97,20 @@ export default function MikopoPapoScreen() {
     }
   };
 
-  const handleRequestRepayTopUp = async (id: string) => {
+  const handleRequestRepayTopUp = async (id: string, amount: number) => {
     try {
-      const res = await apiClient.post(`/papo/request-repay-topup/${id}`);
+      const res = await apiClient.post(`/papo/request-repay-topup/${id}`, { amount });
       Alert.alert('Ombi Limetumwa', res.data?.message);
+      setTopUpRepayId(''); setTopUpRepayAmount('');
       void papo.reload();
     } catch (error: any) {
       Alert.alert('Hitilafu', error.response?.data?.error || 'Imeshindikana kutuma ombi.');
     }
   };
 
-  const handleConfirmRepayTopUp = async (id: string) => {
+  const handleConfirmRepayTopUp = async (id: string, requestId?: string) => {
     try {
-      const res = await apiClient.post(`/papo/confirm-repay-topup/${id}`);
+      const res = await apiClient.post(`/papo/confirm-repay-topup/${id}`, { requestId });
       Alert.alert('Imethibitishwa', res.data?.message);
       void papo.reload();
     } catch (error: any) {
@@ -307,13 +310,13 @@ export default function MikopoPapoScreen() {
                         <View key={rt.id} className="bg-white p-3 rounded-xl border border-teal-200 mb-2">
                           <Text className="font-bold text-slate-900 text-xs">{rt.user?.fullName}</Text>
                           <Text className="text-xs text-slate-600 mt-0.5">
-                            Anarejesha Mtaji: <Text className="font-bold">TZS {Number(rt.principalAmount || 0).toLocaleString()}</Text>
+                            Kiasi anachorejesha: <Text className="font-bold">TZS {Number(rt.repaymentRequest?.amount ?? rt.totalPayable - rt.amountPaid).toLocaleString()}</Text>
                           </Text>
                           <TouchableOpacity
-                            onPress={() => handleConfirmRepayTopUp(rt.id)}
+                            onPress={() => handleConfirmRepayTopUp(rt.id, rt.repaymentRequest?.id)}
                             className="bg-teal-700 py-2 rounded-lg items-center mt-2"
                           >
-                            <Text className="text-white font-bold text-xs">Thibitisha Marejesho & Futa Deni</Text>
+                            <Text className="text-white font-bold text-xs">Thibitisha kiasi kilichopokelewa</Text>
                           </TouchableOpacity>
                           <DeclineRequest path={'/papo/decline/' + rt.id + '/repayment'} reload={papo.reload} />
                         </View>
@@ -348,14 +351,27 @@ export default function MikopoPapoScreen() {
                                 <Text className="text-teal-600 font-bold">Yamebaki Majuma {t.weeksRemaining}</Text>
                               </Text>
                             )}
-                            {t.status === 'ACTIVE' && (
-                              <TouchableOpacity
-                                onPress={() => handleRequestRepayTopUp(t.id)}
-                                className="bg-indigo-600 py-2.5 rounded-xl items-center mt-3"
-                              >
-                                <Text className="text-white font-bold text-xs">Omba Kurejesha Papo Hii</Text>
-                              </TouchableOpacity>
+                            {['ACTIVE', 'OVERDUE', 'REPAYMENT_PENDING'].includes(t.status) && (
+                              <Text className={textMain}>Salio la Papo: TZS {Math.max(0, Number(t.totalPayable) - Number(t.amountPaid)).toLocaleString()}</Text>
                             )}
+                            {['ACTIVE', 'OVERDUE'].includes(t.status) && (topUpRepayId === t.id ? (
+                              <View className="mt-2">
+                                <FormTextInput value={topUpRepayAmount} onChangeText={setTopUpRepayAmount} keyboardType="decimal-pad"
+                                  accessibilityLabel="Kiasi cha kurejesha Papo" placeholder="Andika kiasi cha kurejesha (TZS)" className="rounded-lg bg-white p-3 text-slate-900" />
+                                <TouchableOpacity onPress={() => setTopUpRepayAmount(String(Math.round((Number(t.totalPayable) - Number(t.amountPaid)) * 100) / 100))}
+                                  className="mt-2 self-start p-2"><Text className={textMain}>Tumia salio lote</Text></TouchableOpacity>
+                                <TouchableOpacity onPress={() => {
+                                  const amount = Number(topUpRepayAmount.replace(',', '.'));
+                                  if (!(amount > 0 && amount <= Math.round((Number(t.totalPayable) - Number(t.amountPaid)) * 100) / 100)) return Alert.alert('Kiasi si sahihi', 'Weka kiasi kisichozidi salio.');
+                                  void handleRequestRepayTopUp(t.id, amount);
+                                }} className="mt-2 rounded-lg bg-teal-700 p-3"><Text className="font-bold text-white">Tuma ombi la marejesho</Text></TouchableOpacity>
+                                <TouchableOpacity onPress={() => setTopUpRepayId('')} className="mt-2 self-start p-2"><Text className={textMain}>Ghairi</Text></TouchableOpacity>
+                              </View>
+                            ) : (
+                              <TouchableOpacity onPress={() => { setTopUpRepayId(t.id); setTopUpRepayAmount(''); }} className="mt-3 rounded-xl bg-indigo-600 p-3">
+                                <Text className="font-bold text-white">Rejesha sehemu au salio lote</Text>
+                              </TouchableOpacity>
+                            ))}
                           </View>
                         ))}
                     </>

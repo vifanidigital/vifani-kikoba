@@ -1,4 +1,3 @@
-import { LoanQueue } from './loanQueue';
 import { currentLoanQuote } from '../lib/loanRepayment';
 import { calculateShareOut } from '../lib/shareOut';
 import { createHash } from 'node:crypto';
@@ -121,14 +120,14 @@ router.post('/cycles/restart', authenticateToken, async (req: AuthRequest, res) 
   if (req.body?.confirmed !== true) return res.status(400).json({ error: 'Thibitisha kuanzisha mzunguko mpya.' });
   await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "Group" WHERE id = ${groupId} FOR UPDATE`;
-    const group = await tx.group.findUnique({ where: { id: groupId }, select: { cycleClosedAt: true, hasPapo: true, mandatoryPapoAmount: true, loanQueue: true } });
+    const group = await tx.group.findUnique({ where: { id: groupId }, select: { cycleClosedAt: true, hasPapo: true, mandatoryPapoAmount: true } });
     if (!group?.cycleClosedAt) throw new CycleConflict('Funga mzunguko uliopo kwanza.');
     const where = { groupId };
     const archive = await tx.cycleArchive.findFirst({ where: { groupId, closedAt: group.cycleClosedAt }, select: { id: true } });
     if (!archive) throw new CycleConflict('Kumbukumbu ya mzunguko haijathibitishwa.');
     await tx.group.update({ where: { id: groupId }, data: {
       cycleStartedAt: new Date(), cycleClosedAt: null, historicalMeetingStart: null, historicalMeetingWeekday: null,
-      ...(group.loanQueue ? { loanQueue: { ...(group.loanQueue as LoanQueue), previous: null } } : {}),
+      loanQueue: Prisma.DbNull,
     } });
     await tx.loanApproval.deleteMany({ where: { loan: where } });
     await tx.loanAnnouncementAck.deleteMany({ where: { loan: where } });

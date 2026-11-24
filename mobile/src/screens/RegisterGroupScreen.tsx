@@ -13,16 +13,12 @@ import {
   Platform,
   Animated,
   LayoutAnimation,
-  UIManager } from 'react-native';
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Application from 'expo-application';
 import { Ionicons } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 const WEAK_PINS = ['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '12345', '123456', '000000'];
 
