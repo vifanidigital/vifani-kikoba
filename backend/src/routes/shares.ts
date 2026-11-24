@@ -1,9 +1,12 @@
+import historicalMeetings from './historicalMeetings';
+import { localDate, parseMeetingDate } from '../lib/meetingCalendar';
 import { interestTiming } from '../lib/loanInterest';
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticateToken, AuthRequest } from '../middlewares/auth';
 
 const router = Router();
+router.use('/historical-meetings', historicalMeetings);
 const prisma = new PrismaClient();
 const LEADER_ROLES = ['CHAIRPERSON', 'SECRETARY', 'TREASURER'];
 
@@ -11,8 +14,7 @@ const LEADER_ROLES = ['CHAIRPERSON', 'SECRETARY', 'TREASURER'];
 router.get('/summary', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const { userId, groupId } = req.user!;
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const startOfToday = parseMeetingDate(localDate(new Date()))!;
 
     const [
       groupShares,
@@ -170,8 +172,7 @@ router.get('/session-data', authenticateToken, async (req: AuthRequest, res: Res
   try {
     const { userId, groupId, role } = req.user!;
     const isLeader = LEADER_ROLES.includes(role);
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const startOfToday = parseMeetingDate(localDate(new Date()))!;
 
     const [
       group,
@@ -208,7 +209,7 @@ router.get('/session-data', authenticateToken, async (req: AuthRequest, res: Res
     if (!group) return res.status(404).json({ error: 'Kikoba hakijapatikana.' });
 
     const now = new Date();
-    const start = new Date(group.createdAt);
+    const start = group.historicalMeetingStart ?? group.createdAt;
     const msPerWeek = 7 * 24 * 60 * 60 * 1000;
     const currentWeek = Math.max(1, Math.floor((now.getTime() - start.getTime()) / msPerWeek) + 1);
     const totalWeeks = Math.max(currentWeek, Math.round((group.cycleMonths || 12) * 4.33));
@@ -317,8 +318,7 @@ router.post('/record-meeting', authenticateToken, async (req: AuthRequest, res: 
     }
     const amountPaid = sharesCount * group.shareValue;
     const meetingDate = new Date();
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const startOfToday = parseMeetingDate(localDate(new Date()))!;
 
     const recorded = await prisma.$transaction(async (tx) => {
       const membership = await tx.groupMember.findUnique({

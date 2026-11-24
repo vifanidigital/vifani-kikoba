@@ -42,6 +42,8 @@ model Group {
   announcementUpdatedAt   DateTime?
   constitution      String?
   meetingDayOfWeek    Int      @default(4)
+  historicalMeetingStart DateTime?
+  historicalMeetingWeekday Int?
   meetingTime         String   @default("16:00")
   meetingVenue        String?
   cycleMonths         Int      @default(12)
