@@ -526,9 +526,9 @@ export default function KikaoAkibaScreen() {
                                     : `TZS ${Number(papoInterestPaid || 0).toLocaleString()}`
                                 }
                               />
-                              {!isNoPapoLocked && Number(member.totalPapoInterestDue) > 0 && (
+                              {!isNoPapoLocked && Number(m.totalPapoInterestDue) > 0 && (
                                 <TouchableOpacity accessibilityRole="button" className="mt-1 self-start py-2"
-                                  onPress={() => setPapoInterestPaid(Number(papoInterestPaid) > 0 ? '0' : String(member.totalPapoInterestDue))}>
+                                  onPress={() => setPapoInterestPaid(Number(papoInterestPaid) > 0 ? '0' : String(m.totalPapoInterestDue))}>
                                   <Text className={`text-xs font-bold ${textMain}`}>
                                     {Number(papoInterestPaid) > 0 ? 'Hakutoa riba' : 'Weka kama imelipwa'}
                                   </Text>
