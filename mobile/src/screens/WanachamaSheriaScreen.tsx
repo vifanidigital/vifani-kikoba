@@ -492,6 +492,12 @@ export default function WanachamaSheriaScreen() {
                               </Text>
                             </View>
                             <View className="flex-row justify-between py-0.5">
+                              <Text className={`text-xs ${textSub}`}>Deni la riba ya Papo:</Text>
+                              <Text className="text-xs font-bold text-rose-600">
+                                TZS {Number(auditData.papoInterestDebt || 0).toLocaleString()}
+                              </Text>
+                            </View>
+                            <View className="flex-row justify-between py-0.5">
                               <Text className={`text-xs ${textSub}`}>Faini Zinazodaiwa:</Text>
                               <Text className="text-xs font-bold text-rose-600">
                                 TZS {Number(auditData.unpaidFines || 0).toLocaleString()}

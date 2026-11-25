@@ -1,3 +1,5 @@
+import { localDate, parseMeetingDate } from '../lib/meetingCalendar';
+import { currentLoanQuote } from '../lib/loanRepayment';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { papoPayment, outstandingPapoPrincipal } from '../lib/papoPayment';
@@ -17,7 +19,7 @@ router.get('/status', authenticateToken, async (req: AuthRequest, res: Response)
     const { userId, groupId, role } = req.user!;
     const isLeader = LEADER_ROLES.includes(role);
 
-    const [group, papoAcc, myTopUps, groupPendingTopUps, groupRepayingTopUps] = await Promise.all([
+    const [group, papoAcc, myTopUps, groupPendingTopUps, groupRepayingTopUps, interestDebts, interestPaymentRequests, activeLoans, unpaidFines] = await Promise.all([
       prisma.group.findUnique({ where: { id: groupId } }),
       prisma.papoAccount.findUnique({ where: { userId_groupId: { userId, groupId } } }),
       prisma.papoTopUp.findMany({
@@ -34,6 +36,13 @@ router.get('/status', authenticateToken, async (req: AuthRequest, res: Response)
             orderBy: {  createdAt: 'asc'},
           })
         : Promise.resolve([]),
+      prisma.papoInterestDebt.findMany({ where: { groupId, userId, confirmedAt: null }, orderBy: { meetingDate: 'asc' } }),
+      isLeader ? prisma.papoInterestDebt.findMany({
+        where: { groupId, confirmedAt: null, requestId: { not: null } },
+        include: { user: { select: { fullName: true } } }, orderBy: { meetingDate: 'asc' },
+      }) : Promise.resolve([]),
+      prisma.loan.findMany({ where: { groupId, userId, status: { in: ['DISBURSED','OVERDUE','REPAYMENT_PENDING','PENDING'] } } }),
+      prisma.fineRecord.aggregate({ where: { groupId, userId, isPaid: false }, _sum: { amount: true } }),
     ]);
 
     if (!group) return res.status(404).json({ error: 'Kikoba hakijapatikana.' });
@@ -72,7 +81,21 @@ router.get('/status', authenticateToken, async (req: AuthRequest, res: Response)
       };
     });
 
+    const interestDebtTotal = interestDebts.reduce((sum, row) => sum + row.amount, 0);
+    const loanDebt = activeLoans.reduce((sum, row) => sum + (row.status === 'PENDING' ? row.fundedAmount ?? 0 :
+      currentLoanQuote(row)?.dueBalance ?? Math.max(0, row.totalRepayable - row.amountPaid)), 0);
+    const topUpDebt = activeList.reduce((sum, row) => sum + Math.max(0, row.totalPayable - row.amountPaid), 0) +
+      myTopUps.filter(row => row.status === 'PENDING').reduce((sum, row) => sum + (row.fundedAmount ?? 0), 0);
     res.json({
+      interestDebtTotal,
+      totalDebt: loanDebt + topUpDebt + interestDebtTotal + (unpaidFines._sum.amount ?? 0),
+      interestDebts: interestDebts.map(({ id, meetingDate, amount, requestId, reportedPaidAt, feedback }) => ({
+        id, meetingDate: localDate(meetingDate), amount, pending: !!requestId,
+        paidDate: reportedPaidAt && localDate(reportedPaidAt), feedback,
+      })),
+      interestPaymentRequests: interestPaymentRequests.map(({ id, meetingDate, amount, requestId, reportedPaidAt, user }) => ({
+        id, meetingDate: localDate(meetingDate), amount, requestId, paidDate: reportedPaidAt && localDate(reportedPaidAt), fullName: user.fullName,
+      })),
       hasPapo: group.hasPapo,
       allowTopUpPapo: group.allowTopUpPapo,
       minTopUpPapoCap: group.minTopUpPapoCap,
@@ -230,6 +253,50 @@ router.post('/decline/:id/:stage', authenticateToken, async (req: AuthRequest, r
   });
   if (!result.count) return res.status(409).json({ error: 'Ombi hili halisubiri uamuzi.' });
   res.json({ message: 'Ombi limekataliwa na sababu inaonekana kwa mwanachama.' });
+});
+
+router.post('/interest-debts/:id/report', authenticateToken, async (req: AuthRequest, res) => {
+  const { groupId, userId } = req.user!;
+  const paidAt = typeof req.body?.paidDate === 'string' ? parseMeetingDate(req.body.paidDate) : null;
+  if (!paidAt || paidAt > parseMeetingDate(localDate(new Date()))!) return res.status(400).json({ error: 'Weka tarehe halisi ya malipo isiyopita leo.' });
+  await prisma.$transaction(async tx => {
+    await lockLoanGroup(tx, groupId);
+    const group = await tx.group.findUniqueOrThrow({ where: { id: groupId }, select: { cycleClosedAt: true } });
+    if (group.cycleClosedAt) throw new LoanConflict('Mzunguko umefungwa.');
+    const debt = await tx.papoInterestDebt.findFirst({ where: { id: String(req.params.id), groupId, userId, confirmedAt: null } });
+    if (!debt || debt.requestId) throw new LoanConflict('Deni halipatikani au taarifa yake tayari inasubiri uthibitisho.');
+    if (paidAt < debt.meetingDate) throw new LoanConflict('Tarehe ya malipo isiwe kabla ya kikao kilicholeta deni.');
+    await tx.papoInterestDebt.update({ where: { id: debt.id }, data: { requestId: randomUUID(), reportedPaidAt: paidAt, feedback: null } });
+  }, { timeout: 25000 });
+  res.json({ message: 'Taarifa imetumwa kwa viongozi. Deni litaondoka baada ya kuthibitishwa.' });
+});
+
+router.post('/interest-debts/:id/review', authenticateToken, async (req: AuthRequest, res) => {
+  const { groupId, userId, role } = req.user!;
+  if (!LEADER_ROLES.includes(role)) return res.sendStatus(403);
+  const input = z.discriminatedUnion('decision', [
+    z.object({ requestId: z.string().uuid(), decision: z.literal('confirm') }),
+    z.object({ requestId: z.string().uuid(), decision: z.literal('decline'), reason: z.string().trim().min(3).max(300) }),
+  ]).safeParse(req.body);
+  if (!input.success) return res.status(400).json({ error: 'Chagua ombi halali na andika sababu ukilikataa.' });
+  const review = input.data;
+  await prisma.$transaction(async tx => {
+    await lockLoanGroup(tx, groupId);
+    const group = await tx.group.findUniqueOrThrow({ where: { id: groupId }, select: { cycleClosedAt: true } });
+    if (group.cycleClosedAt) throw new LoanConflict('Mzunguko umefungwa.');
+    const debt = await tx.papoInterestDebt.findFirst({ where: { id: String(req.params.id), groupId, requestId: review.requestId, confirmedAt: null } });
+    if (!debt?.reportedPaidAt) throw new LoanConflict('Taarifa hii tayari imeshughulikiwa au imebadilika.');
+    if (review.decision === 'decline') {
+      await tx.papoInterestDebt.update({ where: { id: debt.id }, data: { requestId: null, reportedPaidAt: null, feedback: review.reason } });
+      return;
+    }
+    await tx.transaction.create({ data: {
+      groupId, userId: debt.userId, type: 'PAPO_INTEREST', amount: debt.amount,
+      notes: 'Malipo ya deni la riba ya Papo ' + debt.id, createdAt: debt.reportedPaidAt,
+    } });
+    await tx.papoInterestDebt.update({ where: { id: debt.id }, data: { confirmedAt: new Date(), confirmedBy: userId } });
+  }, { timeout: 25000 });
+  res.json({ message: review.decision === 'confirm' ? 'Deni limelipwa na riba imeingia kwenye tarehe ya malipo.' : 'Taarifa imerudishwa kwa mwanachama.' });
 });
 
 router.use((error: unknown, _req: AuthRequest, res: Response, _next: import('express').NextFunction) => {

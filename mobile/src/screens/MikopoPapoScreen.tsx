@@ -21,6 +21,7 @@ import { useTabData } from '../api/useTabData';
 import TopTabs from '../components/TopTabs';
 import TabDataNotice from '../components/TabDataNotice';
 import { DeclineRequest, FundingQueuePanel, LoanPaymentPanel, LoanQueuePanel } from '../components/LoanWorkflows';
+import PapoInterestDebts from '../components/PapoInterestDebts';
 import { parsePapo, parseLoans, parseLoanQueue } from '../api/tabResponses';
 
 export default function MikopoPapoScreen() {
@@ -379,6 +380,9 @@ export default function MikopoPapoScreen() {
                   )}
                 </>
               )}
+              <PapoInterestDebts key={scope} debts={papo.data?.interestDebts ?? []}
+                requests={isLeader ? papo.data?.interestPaymentRequests ?? [] : []}
+                interestTotal={papo.data?.interestDebtTotal} totalDebt={papo.data?.totalDebt} reload={papo.reload} />
             </>
           ) : (
             <>

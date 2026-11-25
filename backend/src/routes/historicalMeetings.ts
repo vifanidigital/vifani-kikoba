@@ -232,10 +232,15 @@ router.put('/:date/record', async (req: AuthRequest, res) => {
     await tx.shareRecord.update({ where: { id: previous.id }, data: { sharesCount, amountPaid, socialFundPaid } });
     const notes = 'Riba ya Papo ya kikao cha nyuma';
     const ownInterest = await tx.transaction.findFirst({ where: { groupId, userId, createdAt: day, type: 'PAPO_INTEREST', notes: { in: meetingInterestNotes } } });
+    if (papoInterestPaid > 0) {
+      const debt = await tx.papoInterestDebt.findUnique({ where: { groupId_userId_meetingDate: { groupId, userId, meetingDate: date } } });
+      if (debt?.requestId) throw new HistoricalConflict('Malipo ya deni hili yashughulikiwe kwenye Mfuko wa Papo.');
+      if (debt) await tx.papoInterestDebt.delete({ where: { id: debt.id } });
+    }
     if (!group.hasPapo && papoInterestPaid !== (ownInterest?.amount ?? 0)) throw new HistoricalConflict('Papo haijawashwa.');
     if (ownInterest && ownInterest.amount !== papoInterestPaid) await tx.transaction.update({ where: { id: ownInterest.id }, data: { amount: papoInterestPaid } });
     else if (!ownInterest && papoInterestPaid) {
-      if (await tx.transaction.count({ where: { groupId, userId, createdAt: day, type: 'PAPO_INTEREST' } })) {
+      if (await tx.transaction.count({ where: { groupId, userId, createdAt: day, type: 'PAPO_INTEREST', NOT: { notes: { startsWith: 'Malipo ya deni la riba ya Papo ' } } } })) {
         throw new HistoricalConflict('Riba ilirekodiwa kupitia tukio jingine la kikao.');
       }
       await tx.transaction.create({ data: { groupId, userId, type: 'PAPO_INTEREST', amount: papoInterestPaid, notes, createdAt: date } });

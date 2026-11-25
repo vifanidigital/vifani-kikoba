@@ -95,7 +95,7 @@ router.get('/member-audit/:targetUserId', authenticateToken, async (req: AuthReq
 
     const targetUserId = String(req.params.targetUserId);
 
-    const [sharesAgg, papoAcc, activeLoans, activeTopUps, unpaidFinesAgg, memberInfo, interestLedger, allTopUps] = await Promise.all([
+    const [sharesAgg, papoAcc, activeLoans, activeTopUps, unpaidFinesAgg, memberInfo, interestLedger, allTopUps, interestDebts] = await Promise.all([
       prisma.shareRecord.aggregate({
         where: { groupId, userId: targetUserId },
         _sum: { sharesCount: true, amountPaid: true, socialFundPaid: true },
@@ -118,6 +118,7 @@ router.get('/member-audit/:targetUserId', authenticateToken, async (req: AuthReq
       }),
       prisma.transaction.findMany({ where: { groupId, userId: targetUserId, type: { in: ['LOAN_INTEREST_REPAYMENT', 'PAPO_INTEREST'] } } }),
       prisma.papoTopUp.findMany({ where: { groupId, userId: targetUserId } }),
+      prisma.papoInterestDebt.aggregate({ where: { groupId, userId: targetUserId, confirmedAt: null }, _sum: { amount: true } }),
     ]);
 
     if (!memberInfo) return res.status(404).json({ error: 'Mwanachama hajapatikana kwenye kikundi hiki.' });
@@ -127,7 +128,8 @@ router.get('/member-audit/:targetUserId', authenticateToken, async (req: AuthReq
     const periodicPapo = interestLedger.filter(row => row.type === 'PAPO_INTEREST').reduce((sum, row) => sum + row.amount, 0);
     const topUpInterest = allTopUps.reduce((sum, row) => sum + Math.max(0, Math.min(row.amountPaid, row.totalPayable - row.principalAmount)), 0);
     const personalClaims = (sharesAgg._sum.amountPaid ?? 0) + (sharesAgg._sum.socialFundPaid ?? 0) + (papoAcc?.mandatoryBalance ?? 0) + onTime + Math.floor((periodicPapo + topUpInterest) * 50) / 100;
-    const totalDebt = loanDebt + papoTopUpDebt + (unpaidFinesAgg._sum.amount ?? 0);
+    const papoInterestDebt = interestDebts._sum.amount ?? 0;
+    const totalDebt = loanDebt + papoTopUpDebt + papoInterestDebt + (unpaidFinesAgg._sum.amount ?? 0);
 
     res.json({
       sharesCount: sharesAgg._sum.sharesCount || 0,
@@ -136,6 +138,7 @@ router.get('/member-audit/:targetUserId', authenticateToken, async (req: AuthReq
       papoMandatory: papoAcc?.mandatoryBalance || 0,
       loanDebt,
       papoTopUpDebt,
+      papoInterestDebt,
       unpaidFines: unpaidFinesAgg._sum.amount || 0,
       interestProfit: onTime,
       personalClaims,

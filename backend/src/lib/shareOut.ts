@@ -13,6 +13,7 @@ type ShareOutInput = {
   loans: (Debt & { totalRepayable: number })[];
   topUps: (Debt & { totalPayable: number; principalAmount: number })[];
   unpaidFines: MemberAmount[];
+  unpaidPapoInterest?: MemberAmount[];
   paidFines: number;
   expenses: number;
 };
@@ -60,7 +61,8 @@ export function calculateShareOut(input: ShareOutInput) {
     const papoPaid = papoByUser.get(member.userId) ?? 0;
     const papoRefund = Math.floor(papoPaid / 2);
     const dividend = member.isActive === false ? 0 : baseDividend + (dividendIndex++ < extraCents ? 1 : 0);
-    const debt = sumMoney([
+    const papoInterestDebt = sumMoney((input.unpaidPapoInterest ?? []).filter(row => row.userId === member.userId).map(row => row.amount));
+    const debt = papoInterestDebt + sumMoney([
       ...input.loans.filter(row => row.userId === member.userId && ['DISBURSED','OVERDUE','REPAYMENT_PENDING'].includes(row.status)).map(row => row.totalRepayable - row.amountPaid),
       ...input.topUps.filter(row => row.userId === member.userId && ['ACTIVE','OVERDUE','REPAYMENT_PENDING'].includes(row.status)).map(row => row.totalPayable - row.amountPaid),
       ...input.unpaidFines.filter(row => row.userId === member.userId).map(row => row.amount),
@@ -74,6 +76,7 @@ export function calculateShareOut(input: ShareOutInput) {
       mySocialFund: social / 100,
       myPapoMandatory: mandatoryDebt / 100,
       myPapoMandatoryDebt: mandatoryDebt / 100,
+      myPapoInterestDebt: papoInterestDebt / 100,
       otherDeductions: debt / 100,
       balanceToCollect: Math.max(0, debt - (gross - mandatoryDebt)) / 100,
       myOnTimeLoanInterest: timely / 100,

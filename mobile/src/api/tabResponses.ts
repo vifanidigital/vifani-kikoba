@@ -18,9 +18,19 @@ const fundingEntry = z.object({
   remaining: z.number(), needsGuarantor: z.boolean().optional(),
 });
 
+const papoInterestDebt = z.object({
+  id: z.string(), meetingDate: z.string(), amount: z.number(), paidDate: z.string().nullable(),
+});
+export type PapoInterestDebt = z.infer<typeof papoInterestDebt> & { pending: boolean; feedback: string | null };
+export type PapoInterestPaymentRequest = z.infer<typeof papoInterestDebt> & { requestId: string; fullName: string };
+
 export const parsePapo = z.looseObject({
   hasPapo: z.boolean(),
   topUps: z.array(record),
+  interestDebtTotal: z.number().optional(),
+  totalDebt: z.number().optional(),
+  interestDebts: z.array(papoInterestDebt.extend({ pending: z.boolean(), feedback: z.string().nullable() })).optional(),
+  interestPaymentRequests: z.array(papoInterestDebt.extend({ requestId: z.string(), fullName: z.string() })).optional(),
   fundingQueue: z.array(fundingEntry).optional(),
   repayingTopUpRequests: z.array(record).optional(),
 }).parse;
@@ -48,7 +58,7 @@ const equalShareOut = z.object({
   closePreview: z.object({ token: z.string(), members: z.array(cycleMember) }).nullish(),
   myEstimate: z.object({
     fullName: z.string(), myCapital: z.number(), mySocialFund: z.number(),
-    myPapoMandatory: z.number(), myPapoMandatoryDebt: z.number().optional(), payoutAfterPapoRepayment: z.number().optional(), otherDeductions: z.number().optional(), balanceToCollect: z.number().optional(), myOnTimeLoanInterest: z.number(), myPapoInterestPaid: z.number(),
+    myPapoMandatory: z.number(), myPapoMandatoryDebt: z.number().optional(), payoutAfterPapoRepayment: z.number().optional(), otherDeductions: z.number().optional(), myPapoInterestDebt: z.number().optional(), balanceToCollect: z.number().optional(), myOnTimeLoanInterest: z.number(), myPapoInterestPaid: z.number(),
     myPapoInterestRefund: z.number(), estimatedProfitDividend: z.number(),
     totalDeductions: z.number(), netPayout: z.number(),
   }).nullable(),

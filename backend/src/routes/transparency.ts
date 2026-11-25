@@ -13,7 +13,7 @@ type CycleDb = Prisma.TransactionClient;
 
 async function loadCycle(db: CycleDb, groupId: string) {
   const where = { groupId };
-  const [group, memberships, shares, papoAccounts, fines, loans, topUps, expenses, transactions, terminations, ruleLogs] = await Promise.all([
+  const [group, memberships, shares, papoAccounts, fines, loans, topUps, expenses, transactions, terminations, ruleLogs, papoInterestDebts] = await Promise.all([
     db.group.findUnique({ where: { id: groupId }, select: {
       id: true, name: true, groupType: true, hasPapo: true, mandatoryPapoAmount: true,
       createdAt: true, cycleStartedAt: true, cycleClosedAt: true, historicalMeetingStart: true,
@@ -28,6 +28,7 @@ async function loadCycle(db: CycleDb, groupId: string) {
     db.transaction.findMany({ where }),
     db.memberTermination.findMany({ where, include: { votes: true } }),
     db.ruleChangeLog.findMany({ where }),
+    db.papoInterestDebt.findMany({ where }),
   ]);
   if (!group) return null;
   const result = calculateShareOut({
@@ -39,11 +40,12 @@ async function loadCycle(db: CycleDb, groupId: string) {
     mandatoryPapoAmount: group.hasPapo ? group.mandatoryPapoAmount : 0,
     periodicPapo: transactions.filter(row => row.type === 'PAPO_INTEREST'),
     interest: transactions.filter(row => row.type === 'LOAN_INTEREST_REPAYMENT'),
+    unpaidPapoInterest: papoInterestDebts.filter(row => !row.confirmedAt),
     unpaidFines: fines.filter(row => !row.isPaid),
     paidFines: fines.filter(row => row.isPaid).reduce((sum, row) => sum + row.amount, 0),
     expenses: expenses.reduce((sum, row) => sum + row.amount, 0),
   });
-  return { group, result, records: { memberships, shares, papoAccounts, fines, loans, topUps, expenses, transactions, terminations, ruleLogs } };
+  return { group, result, records: { memberships, shares, papoAccounts, fines, loans, topUps, expenses, transactions, terminations, ruleLogs, papoInterestDebts } };
 }
 
 const supported = (type: string) => ['KIKOBA', 'SHARES', 'VICOBA'].includes(type.trim().toUpperCase());
@@ -102,6 +104,7 @@ router.post('/cycles/close', authenticateToken, async (req: AuthRequest, res) =>
     if ([...cycle.records.loans, ...cycle.records.topUps].some(row => row.status === 'PENDING' && (row.fundedAmount ?? 0) > 0)) {
       throw new CycleConflict('Malizia maombi yaliyopokea fedha kwa sehemu kabla ya kufunga mzunguko.');
     }
+    if (cycle.records.papoInterestDebts.some(row => !row.confirmedAt)) throw new CycleConflict('Thibitisha malipo ya madeni yote ya riba ya Papo kabla ya kufunga mzunguko.');
     if (req.body.token !== previewId(cycle)) throw new CycleConflict('Taarifa za mgao zimebadilika. Pakia upya na uzihakiki.');
     const closedAt = new Date();
     await tx.cycleArchive.create({ data: {
@@ -135,6 +138,7 @@ router.post('/cycles/restart', authenticateToken, async (req: AuthRequest, res) 
     await tx.loan.deleteMany({ where });
     await tx.memberTermination.deleteMany({ where });
     await tx.shareRecord.deleteMany({ where });
+    await tx.papoInterestDebt.deleteMany({ where });
     await tx.papoAccount.deleteMany({ where });
     if (group.hasPapo && group.mandatoryPapoAmount > 0) {
       const activeMembers = await tx.groupMember.findMany({ where: { groupId, isActive: true }, select: { userId: true } });

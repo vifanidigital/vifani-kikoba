@@ -1,3 +1,4 @@
+import { lockLoanGroup, LoanConflict } from './loanQueue';
 import { mandatoryPapoBalance, outstandingPapoPrincipal } from '../lib/papoPayment';
 import { currentLoanQuote, RepaymentPlan } from '../lib/loanRepayment';
 import historicalMeetings from './historicalMeetings';
@@ -269,7 +270,7 @@ router.get('/session-data', authenticateToken, async (req: AuthRequest, res: Res
           })
         : Promise.resolve([]),
       isLeader ? prisma.papoAccount.findMany({ where: { groupId } }) : Promise.resolve([]),
-      isLeader ? prisma.papoTopUp.findMany({ where: { groupId, status: { in: ['ACTIVE', 'OVERDUE'] } } }) : Promise.resolve([]),
+      isLeader ? prisma.papoTopUp.findMany({ where: { groupId, status: { in: ['ACTIVE', 'OVERDUE', 'REPAYMENT_PENDING'] } } }) : Promise.resolve([]),
       isLeader ? prisma.shareRecord.findMany({ where: { groupId, meetingDate: { gte: startOfToday } } }) : Promise.resolve([]),
       isLeader ? prisma.fineRecord.findMany({ where: { groupId, createdAt: { gte: startOfToday } } }) : Promise.resolve([]),
       isLeader ? prisma.transaction.findMany({ where: { groupId, type: 'PAPO_INTEREST', createdAt: { gte: startOfToday } } }) : Promise.resolve([]),
@@ -305,7 +306,7 @@ router.get('/session-data', authenticateToken, async (req: AuthRequest, res: Res
 
       const userTodayShare = todayShares.find((s) => s.userId === mId);
       const userTodayFines = todayFines.filter((f) => f.userId === mId);
-      const userTodayPapoTx = todayTxs.find((tx) => tx.userId === mId);
+      const userTodayPapoTx = todayTxs.find((tx) => tx.userId === mId && tx.notes === 'Riba ya Papo kikaoni');
       const recordedToday = Boolean(userTodayShare || userTodayFines.length > 0 || userTodayPapoTx);
 
       return {
@@ -387,15 +388,32 @@ router.post('/record-meeting', authenticateToken, async (req: AuthRequest, res: 
     }
     const amountPaid = sharesCount * group.shareValue;
     const meetingDate = new Date();
-    const startOfToday = parseMeetingDate(localDate(new Date()))!;
+    const startOfToday = parseMeetingDate(localDate(meetingDate))!;
 
     const recorded = await prisma.$transaction(async (tx) => {
+      await lockLoanGroup(tx, groupId);
+      const settings = await tx.group.findUniqueOrThrow({ where: { id: groupId }, select: { cycleClosedAt: true, hasPapo: true, mandatoryPapoAmount: true, papoMeetingInterest: true } });
+      if (settings.cycleClosedAt) throw new LoanConflict('Mzunguko umefungwa.');
       const membership = await tx.groupMember.findUnique({
         where: { groupId_userId: { groupId, userId: targetUserId } }, select: { isActive: true },
       });
       if (!membership?.isActive) return false;
+      const debtKey = { groupId, userId: targetUserId, meetingDate: startOfToday };
+      const debt = await tx.papoInterestDebt.findUnique({ where: { groupId_userId_meetingDate: debtKey } });
+      if (papoInterestPaid > 0) {
+        if (debt?.requestId) throw new LoanConflict('Malipo ya deni hili yashughulikiwe kwenye Mfuko wa Papo.');
+        if (debt) await tx.papoInterestDebt.delete({ where: { id: debt.id } });
+      } else if (settings.hasPapo && !debt) {
+        const [account, topUps] = await Promise.all([
+          tx.papoAccount.findUnique({ where: { userId_groupId: { userId: targetUserId, groupId } } }),
+          tx.papoTopUp.findMany({ where: { groupId, userId: targetUserId, status: { in: ['ACTIVE', 'OVERDUE', 'REPAYMENT_PENDING'] } } }),
+        ]);
+        const capital = (account?.mandatoryBalance || settings.mandatoryPapoAmount) + topUps.reduce((sum, row) => sum + outstandingPapoPrincipal(row), 0);
+        const amount = Math.round(capital * settings.papoMeetingInterest / 100);
+        if (amount > 0) await tx.papoInterestDebt.create({ data: { ...debtKey, amount } });
+      }
       await tx.shareRecord.deleteMany({ where: { groupId, userId: targetUserId, meetingDate: { gte: startOfToday } } });
-      await tx.transaction.deleteMany({ where: { groupId, userId: targetUserId, type: 'PAPO_INTEREST', createdAt: { gte: startOfToday } } });
+      await tx.transaction.deleteMany({ where: { groupId, userId: targetUserId, type: 'PAPO_INTEREST', notes: 'Riba ya Papo kikaoni', createdAt: { gte: startOfToday } } });
       await tx.fineRecord.deleteMany({ where: { groupId, userId: targetUserId, createdAt: { gte: startOfToday } } });
 
       await tx.shareRecord.create({
@@ -404,7 +422,7 @@ router.post('/record-meeting', authenticateToken, async (req: AuthRequest, res: 
 
       if (papoInterestPaid > 0) {
         await tx.transaction.create({
-          data: { groupId, userId: targetUserId, type: 'PAPO_INTEREST', amount: papoInterestPaid, notes: 'Riba ya Papo kikaoni' },
+          data: { groupId, userId: targetUserId, type: 'PAPO_INTEREST', amount: papoInterestPaid, notes: 'Riba ya Papo kikaoni', createdAt: meetingDate },
         });
       }
 
@@ -425,11 +443,13 @@ router.post('/record-meeting', authenticateToken, async (req: AuthRequest, res: 
         }
       }
       return true;
-    }, { isolationLevel: 'Serializable' });
+    }, { timeout: 25000 });
     if (!recorded) return res.status(409).json({ error: 'Mwanachama huyu si hai kwenye kikundi hiki.' });
 
     res.status(201).json({ message: 'Taarifa za kikao zimehifadhiwa!' });
-  } catch {
+  } catch (error) {
+    if (error instanceof LoanConflict) return res.status(409).json({ error: error.message });
+    console.error('Meeting record failed', error instanceof Error ? { name: error.name, code: 'code' in error ? error.code : undefined } : 'Unknown');
     res.status(500).json({ error: 'Imeshindikana kurekodi muamala.' });
   }
 });

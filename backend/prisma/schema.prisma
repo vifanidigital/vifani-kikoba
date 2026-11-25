@@ -25,6 +25,7 @@ model User {
   memberships         GroupMember[]
   shareRecords        ShareRecord[]
   papoAccounts        PapoAccount[]
+  papoInterestDebts   PapoInterestDebt[]
   papoTopUps          PapoTopUp[]
   loans               Loan[]
   guaranteedLoans     Loan[]              @relation("LoanGuarantor")
@@ -99,6 +100,7 @@ model Group {
   members      GroupMember[]
   shareRecords ShareRecord[]
   papoAccounts PapoAccount[]
+  papoInterestDebts PapoInterestDebt[]
   papoTopUps   PapoTopUp[]
   loans        Loan[]
   fines        FineRecord[]
@@ -173,6 +175,24 @@ model PapoAccount {
   updatedAt        DateTime @updatedAt
 
   @@unique([userId, groupId])
+}
+
+model PapoInterestDebt {
+  id              String    @id @default(uuid())
+  groupId         String
+  group           Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meetingDate     DateTime
+  amount          Float
+  requestId       String?
+  reportedPaidAt  DateTime?
+  confirmedAt     DateTime?
+  confirmedBy     String?
+  feedback        String?
+
+  @@unique([groupId, userId, meetingDate])
+  @@index([groupId, confirmedAt])
 }
 
 model PapoTopUp {

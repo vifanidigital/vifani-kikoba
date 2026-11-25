@@ -87,7 +87,8 @@ export default function TransparencyScreen() {
     ['Riba yako ya mkopo iliyolipwa kwa wakati', myEst.myOnTimeLoanInterest],
     ['Nusu ya riba ya Papo uliyolipa', myEst.myPapoInterestRefund],
     ['Sehemu yako sawa ya faida ya kikundi', myEst.estimatedProfitDividend],
-    ['Makato ya madeni mengine na faini', -(myEst.otherDeductions ?? myEst.totalDeductions)],
+    ['Deni la riba ya Papo', -(myEst.myPapoInterestDebt ?? 0)],
+    ['Makato ya madeni mengine na faini', -((myEst.otherDeductions ?? myEst.totalDeductions) - (myEst.myPapoInterestDebt ?? 0))],
   ] : [];
 
   const handleShareWhatsAppReceipt = async () => {
