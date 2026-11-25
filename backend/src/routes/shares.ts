@@ -192,7 +192,7 @@ router.get('/meeting-lookup', authenticateToken, async (req: AuthRequest, res: R
     }
     const group = await prisma.group.findUniqueOrThrow({
       where: { id: groupId },
-      select: { historicalMeetingStart: true, historicalMeetingWeekday: true, cycleStartedAt: true, createdAt: true, meetingDayOfWeek: true },
+      select: { historicalMeetingStart: true, historicalMeetingWeekday: true, cycleStartedAt: true, createdAt: true, meetingDayOfWeek: true, cycleClosedAt: true },
     });
     const start = parseMeetingDate(localDate(group.historicalMeetingStart ?? group.cycleStartedAt ?? group.createdAt))!;
     const weekday = group.historicalMeetingWeekday ?? group.meetingDayOfWeek;
@@ -205,7 +205,7 @@ router.get('/meeting-lookup', authenticateToken, async (req: AuthRequest, res: R
     const window = { gte: date, lt: meetingDayEnd(date) };
     const [shares, fines, ledger, expenses, oldLoans, oldPapo] = await prisma.$transaction([
       prisma.shareRecord.findMany({ where: { groupId, meetingDate: window }, select: { userId: true, sharesCount: true, amountPaid: true, socialFundPaid: true, user: { select: { fullName: true } } } }),
-      prisma.fineRecord.findMany({ where: { groupId, OR: [{ paidAt: window }, { createdAt: window, isPaid: false }] }, select: { amount: true, isPaid: true } }),
+      prisma.fineRecord.findMany({ where: { groupId, OR: [{ paidAt: window }, { createdAt: window }] }, select: { amount: true, isPaid: true, paidAt: true, createdAt: true } }),
       prisma.transaction.findMany({ where: { groupId, createdAt: window }, select: { type: true, amount: true } }),
       prisma.groupExpense.aggregate({ where: { groupId, createdAt: window }, _sum: { amount: true }, _count: true }),
       prisma.loan.aggregate({ where: { groupId, fundedAmount: null, disbursedAt: window }, _sum: { principalAmount: true }, _count: true }),
@@ -214,6 +214,8 @@ router.get('/meeting-lookup', authenticateToken, async (req: AuthRequest, res: R
     const sum = (types: string[]) => ledger.filter(row => types.includes(row.type)).reduce((total, row) => total + row.amount, 0);
     res.json({
       date: localDate(date), week,
+      canEdit: role === 'CHAIRPERSON' && !group.cycleClosedAt && date < today &&
+        Boolean(shares.length || fines.some(row => row.createdAt >= date && row.createdAt < window.lt) || (group.historicalMeetingStart && week !== null)),
       hasRecords: Boolean(shares.length || fines.length || ledger.length || expenses._count || oldLoans._count || oldPapo._count),
       membersRecorded: new Set(shares.map(row => row.userId)).size,
       shares: shares.reduce((total, row) => total + row.amountPaid, 0),
@@ -223,7 +225,7 @@ router.get('/meeting-lookup', authenticateToken, async (req: AuthRequest, res: R
       papoIssued: sum(['PAPO_TOPUP_DISBURSEMENT']) + (oldPapo._sum.principalAmount ?? 0),
       loanIssued: sum(['LOAN_DISBURSEMENT']) + (oldLoans._sum.principalAmount ?? 0),
       loanPrincipalRepaid: sum(['LOAN_REPAYMENT']), loanInterestRepaid: sum(['LOAN_INTEREST_REPAYMENT']),
-      paidFines: fines.filter(row => row.isPaid).reduce((total, row) => total + row.amount, 0),
+      paidFines: fines.filter(row => row.isPaid && row.paidAt && row.paidAt >= date && row.paidAt < window.lt).reduce((total, row) => total + row.amount, 0),
       unpaidFines: fines.filter(row => !row.isPaid).reduce((total, row) => total + row.amount, 0),
       expenses: expenses._sum.amount ?? 0,
       memberEntries: shares.filter(row => LEADER_ROLES.includes(role) || row.userId === userId).map(({ user: { fullName }, userId: id, ...entry }) => ({ id, fullName, ...entry })),

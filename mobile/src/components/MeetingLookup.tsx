@@ -5,12 +5,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { isAxiosError } from 'axios';
 import { apiClient } from '../api/client';
 import { useTheme } from '../context/ThemeContext';
+import HistoricalMeetings from './HistoricalMeetings';
 import { FormTextInput } from './KeyboardForm';
 
 type Meeting = {
   date: string; week: number | null; hasRecords: boolean; membersRecorded: number;
   shares: number; social: number; papoInterest: number; papoRepaid: number; papoIssued: number;
-  loanIssued: number; loanPrincipalRepaid: number; loanInterestRepaid: number; paidFines: number; unpaidFines: number; expenses: number;
+  loanIssued: number; loanPrincipalRepaid: number; loanInterestRepaid: number; paidFines: number; unpaidFines: number; expenses: number; canEdit?: boolean;
   memberEntries: { id: string; fullName: string; sharesCount: number; amountPaid: number; socialFundPaid: number }[];
 };
 const fields = [
@@ -21,18 +22,19 @@ const fields = [
 ] as const;
 const money = (amount: number) => 'TZS ' + amount.toLocaleString('en-TZ');
 
-export default function MeetingLookup() {
+export default function MeetingLookup({ refresh }: { refresh: () => Promise<void> }) {
   const { isDark } = useTheme();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<'date' | 'week'>('date');
   const [query, setQuery] = useState('');
   const [meeting, setMeeting] = useState<Meeting>();
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const color = isDark ? 'text-white' : 'text-slate-900';
   const search = async () => {
     if (loading) return;
-    setMeeting(undefined); setError('');
+    setEditing(false); setMeeting(undefined); setError('');
     if (mode === 'date' ? !/^[0-9]{8}$/.test(query) : !/^[1-9][0-9]{0,2}$/.test(query)) {
       setError(mode === 'date' ? 'Andika tarakimu nane, mfano 20261119.' : 'Andika namba ya juma, mfano 4.');
       return;
@@ -53,7 +55,7 @@ export default function MeetingLookup() {
         <View className="rounded-xl bg-teal-100 p-2"><Ionicons name="search-outline" size={19} color="#115e59" /></View>
         <Text className={'flex-1 text-base font-extrabold ' + color}>Tafuta kikao</Text>
       </Pressable>
-      {open && <Pressable accessibilityRole="button" onPress={() => setOpen(false)} className="min-h-11 flex-row items-center gap-1 rounded-xl border border-slate-400 px-3 py-2">
+      {open && <Pressable accessibilityRole="button" onPress={() => { setOpen(false); setEditing(false); }} className="min-h-11 flex-row items-center gap-1 rounded-xl border border-slate-400 px-3 py-2">
         <Ionicons name="close-outline" size={17} color={isDark ? '#e2e8f0' : '#334155'} />
         <Text className={color}>Funga</Text>
       </Pressable>}
@@ -61,7 +63,7 @@ export default function MeetingLookup() {
     {open && <>
       <View className="my-2 flex-row gap-2">
         {(['date', 'week'] as const).map(option => <Pressable key={option} accessibilityRole="button" accessibilityState={{ selected: option === mode }} disabled={loading}
-          onPress={() => { setMode(option); setQuery(''); setMeeting(undefined); setError(''); }} className={option === mode ? 'rounded-lg bg-teal-700 p-2' : 'rounded-lg border border-slate-400 p-2'}>
+          onPress={() => { setEditing(false); setMode(option); setQuery(''); setMeeting(undefined); setError(''); }} className={option === mode ? 'rounded-lg bg-teal-700 p-2' : 'rounded-lg border border-slate-400 p-2'}>
           <Text className={option === mode ? 'text-white' : color}>{option === 'date' ? 'Tarehe' : 'Namba ya juma'}</Text>
         </Pressable>)}
       </View>
@@ -83,6 +85,20 @@ export default function MeetingLookup() {
             {entry.fullName} · Hisa {entry.sharesCount} ({money(entry.amountPaid)}) · Jamii {money(entry.socialFundPaid)}
           </Text>)}
         </>}
+        {meeting.canEdit && <Pressable accessibilityRole="button" accessibilityState={{ expanded: editing }}
+          onPress={() => setEditing(value => !value)} className="my-3 self-start flex-row items-center gap-2 rounded-xl bg-teal-800 px-4 py-3">
+          <Ionicons name={editing ? 'close-outline' : 'create-outline'} size={18} color="white" />
+          <Text className="font-bold text-white">{editing ? 'Funga uhariri' : 'Hariri kikao hiki'}</Text>
+        </Pressable>}
+        {meeting.canEdit && editing && <HistoricalMeetings key={meeting.date} date={meeting.date} refresh={async () => {
+          try {
+            const { data } = await apiClient.get<Meeting>('/shares/meeting-lookup', { params: { date: meeting.date } });
+            setMeeting(current => current?.date === data.date ? data : current);
+          } catch {
+            setError('Marekebisho yamehifadhiwa. Tafuta kikao tena ili kusasisha muhtasari.');
+          }
+          await refresh();
+        }} />}
       </View>}
     </>}
   </View>;

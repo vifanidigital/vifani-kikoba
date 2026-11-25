@@ -1,6 +1,6 @@
 import { byMemberName } from '../utils/byMemberName';
 import HistoricalEvents from './HistoricalEvents';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { isAxiosError } from 'axios';
 import { apiClient } from '../api/client';
@@ -23,7 +23,7 @@ type Member = {
   record: { id: string; sharesCount: number; amountPaid: number; socialFundPaid: number; papoInterestPaid: number } | null;
 };
 type Fine = { id: string; userId: string; reason: string; amount: number; isPaid: boolean };
-type Session = { members: Member[]; hasPapo: boolean; fines?: Fine[] };
+type Session = { scheduled?: boolean; members: Member[]; hasPapo: boolean; fines?: Fine[] };
 const days = ['Jumapili', 'Jumatatu', 'Jumanne', 'Jumatano', 'Alhamisi', 'Ijumaa', 'Jumamosi'];
 const fields = [
   ['sharesCount', 'Idadi ya hisa'],
@@ -42,25 +42,35 @@ function errorText(error: unknown) {
   return 'Ombi halikufanikiwa. Jaribu tena.';
 }
 
-export default function HistoricalMeetings({ refresh }: { refresh: () => Promise<void> }) {
+export default function HistoricalMeetings({ refresh, date }: { refresh: () => Promise<void>; date?: string }) {
   const { isDark } = useTheme();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(Boolean(date));
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [start, setStart] = useState('');
-  const [picked, setPicked] = useState('');
+  const [picked, setPicked] = useState(date ?? '');
   const [session, setSession] = useState<Session | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
   const [draft, setDraft] = useState(empty);
   const [fineDraft, setFineDraft] = useState<(Omit<Fine, 'amount'> & { amount: string }) | null>(null);
   const [limit, setLimit] = useState(8);
   const [showCompleted, setShowCompleted] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(date));
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const entries = schedule?.sessions ?? (schedule?.dates ?? []).map(date => ({ date, total: 0, filled: 0, complete: false }));
   const pending = entries.filter(entry => !entry.complete);
   const visible = showCompleted ? entries : pending;
   const textColor = isDark ? 'text-white' : 'text-slate-900';
+
+  useEffect(() => {
+    if (!date) return;
+    const controller = new AbortController();
+    apiClient.get<Session>('/shares/historical-meetings/' + date, { signal: controller.signal })
+      .then(({ data }) => setSession(data))
+      .catch(cause => { if (!controller.signal.aborted) setError(errorText(cause)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [date]);
 
   const request = async (work: () => Promise<void>) => {
     if (loading) return;
@@ -127,6 +137,7 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
       setMemberId(null);
       setDraft(empty);
       setMessage('Rekodi imehifadhiwa kwa tarehe ' + picked + '.');
+      if (date) { await refresh(); return; }
       try {
         const { data } = await apiClient.get<Schedule>('/shares/historical-meetings');
         setSchedule(data);
@@ -144,6 +155,7 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
         </Pressable>
       ) : (
         <>
+          {!date && <>
           <View className="mb-2 flex-row items-center justify-between gap-2">
             <Text className={'font-bold ' + textColor}>Vikao vya Nyuma</Text>
             <Pressable accessibilityRole="button" disabled={loading} onPress={() => setOpen(false)} className="p-2"><Text className={textColor}>Funga</Text></Pressable>
@@ -152,6 +164,7 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
           <Text className={'mt-1 text-xs ' + textColor}>Taarifa zitajazwa kwenye mzunguko ulio wazi.</Text>
           <FormTextInput accessibilityLabel="Tarehe ya kuanza mzunguko" placeholder="2026-01-08" placeholderTextColor="#64748b" keyboardType="number-pad" autoCorrect={false} maxLength={10} value={start} editable={!loading} onChangeText={value => setStart(formatDateInput(value))} className={'my-2 rounded-xl border border-slate-400 p-3 ' + textColor} />
           <Pressable accessibilityRole="button" onPress={saveStart} disabled={loading} className="self-start rounded-xl bg-teal-800 px-4 py-3"><Text className="font-bold text-white">Fungua Ratiba ya Nyuma</Text></Pressable>
+          </>}
           {loading && <ActivityIndicator className="mt-3" color="#0f766e" />}
           {error ? <Text accessibilityRole="alert" className="mt-3 text-rose-600">{error}</Text> : null}
           {message ? <Text accessibilityRole="alert" className="mt-3 text-teal-600">{message}</Text> : null}
@@ -190,7 +203,7 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
           {session && (
             <View className="mt-4">
               <Text className={'mb-2 font-bold ' + textColor}>Kikao cha {picked}</Text>
-              <HistoricalEvents key={picked} date={picked} members={session.members} hasPapo={session.hasPapo} refresh={refresh} />
+              {session.scheduled !== false && <HistoricalEvents key={picked} date={picked} members={session.members} hasPapo={session.hasPapo} refresh={refresh} />}
               {byMemberName(session.members, member => member.fullName).map(member => (
                 <View key={member.userId} className="mb-2 rounded-xl border border-slate-400 p-3">
                   <Text className={'font-bold ' + textColor}>{member.fullName}{member.isActive === false ? ' (si hai)' : ''}</Text>
@@ -214,7 +227,7 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
                       <Pressable accessibilityRole="button" onPress={saveRecord} disabled={loading} className="mt-3 self-start rounded-xl bg-teal-800 px-4 py-3"><Text className="font-bold text-white">Hifadhi Rekodi</Text></Pressable>
                     </>
                   ) : (
-                    <Pressable accessibilityRole="button" disabled={loading} onPress={() => { setMemberId(member.userId); setDraft(empty); setError(''); }} className="self-start py-2"><Text className={textColor}>Jaza Rekodi</Text></Pressable>
+                    session.scheduled !== false && <Pressable accessibilityRole="button" disabled={loading} onPress={() => { setMemberId(member.userId); setDraft(empty); setError(''); }} className="self-start py-2"><Text className={textColor}>Jaza Rekodi</Text></Pressable>
                   )}
                   {session.fines?.filter(fine => fine.userId === member.userId).map(fine => (
                     <View key={fine.id} className="mt-3 border-t border-slate-400 pt-2">
@@ -237,10 +250,11 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
                         setFineDraft(null);
                         setMessage(response.data.message);
                         setSession((await apiClient.get<Session>(path)).data);
+                        if (date) await refresh();
                       })}><Text className="font-bold text-white">Hifadhi faini</Text></Pressable>
                       <Pressable disabled={loading} onPress={() => setFineDraft(null)} className="p-2"><Text className={textColor}>Ghairi</Text></Pressable>
                     </View>
-                  </> : <Pressable disabled={loading} onPress={() => setFineDraft({ id: '', userId: member.userId, reason: '', amount: '', isPaid: false })} className="mt-2 self-start rounded-lg border border-slate-400 p-2">
+                  </> : session.scheduled !== false && <Pressable disabled={loading} onPress={() => setFineDraft({ id: '', userId: member.userId, reason: '', amount: '', isPaid: false })} className="mt-2 self-start rounded-lg border border-slate-400 p-2">
                     <Text className={'font-bold ' + textColor}>Ongeza faini</Text>
                   </Pressable>}
                 </View>

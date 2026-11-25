@@ -15,7 +15,7 @@ router.use(authenticateToken, (req: AuthRequest, res, next) => {
   next();
 });
 
-const groupFields = { historicalMeetingStart: true, historicalMeetingWeekday: true, meetingDayOfWeek: true, hasPapo: true } as const;
+const groupFields = { historicalMeetingStart: true, historicalMeetingWeekday: true, meetingDayOfWeek: true, hasPapo: true, cycleClosedAt: true, cycleStartedAt: true, createdAt: true } as const;
 const todayInTanzania = () => parseMeetingDate(localDate(new Date()))!;
 
 async function scheduleResponse(groupId: string, start: Date | null, weekday: number) {
@@ -70,11 +70,21 @@ function isScheduled(date: Date, group: { historicalMeetingStart: Date | null; h
     meetingWeekday(date) === (group.historicalMeetingWeekday ?? group.meetingDayOfWeek));
 }
 
+function canCorrectMeeting(date: Date, group: {
+  cycleClosedAt: Date | null; historicalMeetingStart: Date | null; cycleStartedAt: Date | null; createdAt: Date;
+}) {
+  const start = parseMeetingDate(localDate(group.historicalMeetingStart ?? group.cycleStartedAt ?? group.createdAt))!;
+  return !group.cycleClosedAt && date >= start && date < todayInTanzania();
+}
+
+const meetingInterestNotes = ['Riba ya Papo ya kikao cha nyuma', 'Riba ya Papo kikaoni'];
+
 router.get('/:date', async (req: AuthRequest, res) => {
   const date = parseMeetingDate(String(req.params.date));
   const groupId = req.user!.groupId;
   const group = await prisma.group.findUnique({ where: { id: groupId }, select: groupFields });
-  if (!group || !date || !isScheduled(date, group)) return res.status(400).json({ error: 'Tarehe hiyo haipo kwenye ratiba ya nyuma.' });
+  if (!group || !date || !canCorrectMeeting(date, group)) return res.status(400).json({ error: 'Kikao hakipo wazi kwa marekebisho.' });
+  const scheduled = isScheduled(date, group);
   const members = await prisma.groupMember.findMany({
     where: { groupId, removedAt: null },
     select: { userId: true, isActive: true, user: { select: { fullName: true } } }, orderBy: { joinedAt: 'asc' },
@@ -82,11 +92,12 @@ router.get('/:date', async (req: AuthRequest, res) => {
   const day = { gte: date, lt: meetingDayEnd(date) };
   const [records, interest, fines] = await Promise.all([
     prisma.shareRecord.findMany({ where: { groupId, meetingDate: day }, select: { id: true, userId: true, sharesCount: true, amountPaid: true, socialFundPaid: true } }),
-    prisma.transaction.findMany({ where: { groupId, createdAt: day, type: 'PAPO_INTEREST', notes: 'Riba ya Papo ya kikao cha nyuma' }, select: { userId: true, amount: true } }),
+    prisma.transaction.findMany({ where: { groupId, createdAt: day, type: 'PAPO_INTEREST', notes: { in: meetingInterestNotes } }, select: { userId: true, amount: true } }),
     prisma.fineRecord.findMany({ where: { groupId, createdAt: day }, select: { id: true, userId: true, amount: true, reason: true, isPaid: true } }),
   ]);
+  if (!scheduled && !records.length && !fines.length) return res.status(404).json({ error: 'Hakuna rekodi za kuhariri kwenye kikao hiki.' });
   const byMember = new Map(records.map(entry => [entry.userId, entry]));
-  res.json({ hasPapo: group.hasPapo, fines, members: members.map(member => {
+  res.json({ hasPapo: group.hasPapo, scheduled, fines, members: members.map(member => {
     const record = byMember.get(member.userId);
     return { userId: member.userId, fullName: member.user.fullName, isActive: member.isActive,
       record: record ? { ...record, papoInterestPaid: interest.find(row => row.userId === member.userId)?.amount ?? 0 } : null };
@@ -124,7 +135,7 @@ router.post('/:date/events', async (req: AuthRequest, res) => {
   try {
     await prisma.$transaction(async tx => {
       await lockLoanGroup(tx, groupId);
-      const group = await tx.group.findUnique({ where: { id: groupId }, select: { ...groupFields, cycleClosedAt: true } });
+      const group = await tx.group.findUnique({ where: { id: groupId }, select: groupFields });
       if (!group || group.cycleClosedAt || !isScheduled(date, group)) throw new HistoricalConflict('Kikao hiki hakipo wazi kwa taarifa za nyuma.');
       await saveHistoricalEvent(tx, groupId, date, input.data);
     }, { timeout: 25000 });
@@ -144,7 +155,7 @@ router.put('/:date/events/:id', async (req: AuthRequest, res) => {
   const { groupId, userId } = req.user!;
   await prisma.$transaction(async tx => {
     await lockLoanGroup(tx, groupId);
-    const group = await tx.group.findUnique({ where: { id: groupId }, select: { ...groupFields, cycleClosedAt: true } });
+    const group = await tx.group.findUnique({ where: { id: groupId }, select: groupFields });
     if (!group || group.cycleClosedAt || !isScheduled(from, group) || !isScheduled(to, group)) throw new HistoricalConflict('Chagua tarehe zilizo kwenye ratiba ya mzunguko ulio wazi.');
     await correctHistoricalLoan(tx, groupId, userId, String(req.params.id), from, to, input.data.amount, input.data.includeSecond);
   }, { timeout: 25000 });
@@ -211,9 +222,8 @@ router.put('/:date/record', async (req: AuthRequest, res) => {
   const { recordId, targetUserId: userId, sharesCount, amountPaid, socialFundPaid, papoInterestPaid } = input.data;
   await prisma.$transaction(async tx => {
     await lockLoanGroup(tx, groupId);
-    const group = await tx.group.findUnique({ where: { id: groupId }, select: { ...groupFields, cycleClosedAt: true } });
-    if (!group || group.cycleClosedAt || !isScheduled(date, group)) throw new HistoricalConflict('Kikao hakipo wazi kwa marekebisho.');
-    if (!group.hasPapo && papoInterestPaid) throw new HistoricalConflict('Papo haijawashwa.');
+    const group = await tx.group.findUnique({ where: { id: groupId }, select: groupFields });
+    if (!group || !canCorrectMeeting(date, group)) throw new HistoricalConflict('Kikao hakipo wazi kwa marekebisho.');
     const member = await tx.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } }, select: { removedAt: true } });
     if (!member || member.removedAt) throw new HistoricalConflict('Mwanachama hayupo kwenye orodha ya kuhariri.');
     const day = { gte: date, lt: meetingDayEnd(date) };
@@ -221,9 +231,10 @@ router.put('/:date/record', async (req: AuthRequest, res) => {
     if (!previous) throw new HistoricalConflict('Rekodi ya kikao haikupatikana.');
     await tx.shareRecord.update({ where: { id: previous.id }, data: { sharesCount, amountPaid, socialFundPaid } });
     const notes = 'Riba ya Papo ya kikao cha nyuma';
-    const ownInterest = await tx.transaction.findFirst({ where: { groupId, userId, createdAt: day, type: 'PAPO_INTEREST', notes } });
-    if (ownInterest) await tx.transaction.update({ where: { id: ownInterest.id }, data: { amount: papoInterestPaid } });
-    else if (papoInterestPaid) {
+    const ownInterest = await tx.transaction.findFirst({ where: { groupId, userId, createdAt: day, type: 'PAPO_INTEREST', notes: { in: meetingInterestNotes } } });
+    if (!group.hasPapo && papoInterestPaid !== (ownInterest?.amount ?? 0)) throw new HistoricalConflict('Papo haijawashwa.');
+    if (ownInterest && ownInterest.amount !== papoInterestPaid) await tx.transaction.update({ where: { id: ownInterest.id }, data: { amount: papoInterestPaid } });
+    else if (!ownInterest && papoInterestPaid) {
       if (await tx.transaction.count({ where: { groupId, userId, createdAt: day, type: 'PAPO_INTEREST' } })) {
         throw new HistoricalConflict('Riba ilirekodiwa kupitia tukio jingine la kikao.');
       }
@@ -245,7 +256,7 @@ router.post('/:date/fines', async (req: AuthRequest, res) => {
   const groupId = req.user!.groupId;
   await prisma.$transaction(async tx => {
     await lockLoanGroup(tx, groupId);
-    const group = await tx.group.findUnique({ where: { id: groupId }, select: { ...groupFields, cycleClosedAt: true } });
+    const group = await tx.group.findUnique({ where: { id: groupId }, select: groupFields });
     if (!group || group.cycleClosedAt || !isScheduled(date, group)) throw new HistoricalConflict('Kikao hakipo wazi kwa marekebisho.');
     const member = await tx.groupMember.findFirst({ where: { groupId, userId: input.data.userId, removedAt: null }, select: { id: true } });
     if (!member) throw new HistoricalConflict('Mwanachama hayupo kwenye orodha ya kuhariri.');
@@ -261,8 +272,8 @@ router.put('/:date/fines/:id', async (req: AuthRequest, res) => {
   const groupId = req.user!.groupId;
   await prisma.$transaction(async tx => {
     await lockLoanGroup(tx, groupId);
-    const group = await tx.group.findUnique({ where: { id: groupId }, select: { ...groupFields, cycleClosedAt: true } });
-    if (!group || group.cycleClosedAt || !isScheduled(date, group)) throw new HistoricalConflict('Kikao hakipo wazi kwa marekebisho.');
+    const group = await tx.group.findUnique({ where: { id: groupId }, select: groupFields });
+    if (!group || !canCorrectMeeting(date, group)) throw new HistoricalConflict('Kikao hakipo wazi kwa marekebisho.');
     const fine = await tx.fineRecord.findFirst({ where: { id: String(req.params.id), groupId, createdAt: { gte: date, lt: meetingDayEnd(date) } } });
     if (!fine) throw new HistoricalConflict('Faini haipo kwenye kikao hiki.');
     const linked = await tx.transaction.findFirst({ where: { groupId, type: 'HISTORICAL_FINE', interestLoanId: fine.id } });
