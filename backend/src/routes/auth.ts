@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import bcrypt from 'bcryptjs';
@@ -40,7 +41,7 @@ const strictPinSchema = z
   .string()
   .regex(/^\d{4,6}$/, 'PIN lazima iwe tarakimu 4 hadi 6 pekee.')
   .refine((val) => !WEAK_PINS.includes(val), {
-    message: 'PIN hii ni rahisi mno kutabirika. Tumia PIN imara (mf. 2580).',
+    message: 'PIN hii ni rahisi mno kutabirika. Tumia PIN ambayo ni vigumu kubashiri.',
   });
 
 const optionalLeaderSchema = z
@@ -59,7 +60,7 @@ const registerGroupSchema = z.object({
   latePenalty: z.coerce.number().min(0).default(0),
   socialFundAmount: z.coerce.number().min(0).default(0),
   interestRate: z.coerce.number().min(0).max(100).default(10),
-  loanLimitMultiplier: z.coerce.number().int().min(1).max(10).default(3),
+  loanLimitMultiplier: z.coerce.number().min(1).max(10).default(3),
   maxRepaymentMonths: z.coerce.number().int().min(1).max(36).default(3),
   hasPapo: z.boolean().default(false),
   mandatoryPapoAmount: z.coerce.number().min(0).default(0),
@@ -92,7 +93,7 @@ function buildToken(userId: string, groupId: string, role: string, pinVersion: n
 router.post('/register-group', async (req: Request, res: Response) => {
   try {
     const data = registerGroupSchema.parse(req.body);
-    const defaultPinHash = await bcrypt.hash('2580', 10);
+    const temporaryPins: { name: string; pin: string }[] = [];
     const creatorPinHash = await bcrypt.hash(data.pin, 10);
 
     const leadersToCreate: { fullName: string; phone: string; role: string }[] = [
@@ -162,11 +163,13 @@ router.post('/register-group', async (req: Request, res: Response) => {
           let user = accounts[0];
 
           if (!user) {
+            const temporaryPin = isCreator ? undefined : String(randomInt(100000, 1000000));
+            if (temporaryPin) temporaryPins.push({ name: leader.fullName, pin: temporaryPin });
             user = await tx.user.create({
               data: {
                 fullName: leader.fullName,
                 phone: leader.phone,
-                pinHash: isCreator ? creatorPinHash : defaultPinHash,
+                pinHash: temporaryPin ? await bcrypt.hash(temporaryPin, 10) : creatorPinHash,
                 deviceId: isCreator ? data.deviceId : null,
                 isVerified: isCreator,
               },
@@ -215,8 +218,8 @@ router.post('/register-group', async (req: Request, res: Response) => {
 
     res.status(201).json({
       message:
-        leadersToCreate.length > 1
-          ? 'Kikoba kimesajiliwa! Viongozi wenzako watatumia PIN ya muda 2580 kuingia.'
+        temporaryPins.length
+          ? 'Kikoba kimesajiliwa. Wape viongozi hawa PIN zao faraghani: ' + temporaryPins.map(entry => entry.name + ' — ' + entry.pin).join(', ')
           : 'Kikoba kimesajiliwa kikamilifu!',
       token,
       activeGroup: result.group,
@@ -229,7 +232,7 @@ router.post('/register-group', async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.issues[0].message });
     }
-    res.status(500).json({ error: error.message || 'Hitilafu imetokea wakati wa kusajili kikoba.' });
+    res.status(500).json({ error: 'Hitilafu imetokea wakati wa kusajili kikoba.' });
   }
 });
 

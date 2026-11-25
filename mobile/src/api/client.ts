@@ -1,7 +1,6 @@
 import { create } from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getProtectedItem, SESSION_TOKEN_KEY } from '../utils/protectedStorage';
 
-export const SESSION_TOKEN_KEY = 'vifani_token';
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL?.trim() || 'https://vifani-kikoba.onrender.com/api').replace(/\/+$/, '');
 
 export const apiClient = create({
@@ -13,9 +12,11 @@ export const apiClient = create({
 });
 
 apiClient.interceptors.request.use(async (config) => {
+  if (config.url && (/^[a-z][a-z0-9+.-]*:/i.test(config.url) || /^(?:\/\/|\\)/.test(config.url))) throw new Error('Ombi la API linahitaji njia ya ndani.');
+  if (!__DEV__ && !API_URL.startsWith('https://')) throw new Error('API ya uzalishaji inahitaji HTTPS.');
   // A retry must keep the group session used by the original request.
   if (config.headers.has('Authorization')) return config;
-  const token = await AsyncStorage.getItem(SESSION_TOKEN_KEY);
+  const token = await getProtectedItem(SESSION_TOKEN_KEY);
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;

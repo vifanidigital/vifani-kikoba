@@ -1,3 +1,4 @@
+import { BIOMETRIC_CREDENTIALS_KEY, getProtectedItem, setProtectedItem, removeProtectedItem } from '../utils/protectedStorage';
 import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { router } from 'expo-router';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -19,7 +20,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Application from 'expo-application';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, FontAwesome5, FontAwesome6 } from '@expo/vector-icons';
 import { apiClient } from '../api/client';
 import { isAxiosError } from 'axios';
@@ -49,7 +49,7 @@ export default function LoginScreen() {
     try {
       const compatible = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
-      const savedCreds = await AsyncStorage.getItem('vifani_bio_creds');
+      const savedCreds = await getProtectedItem(BIOMETRIC_CREDENTIALS_KEY);
       if (compatible && enrolled && savedCreds) {
         setHasSavedBiometrics(true);
       }
@@ -101,7 +101,7 @@ export default function LoginScreen() {
         fallbackLabel: 'Tumia PIN',
       });
       if (!result.success) return;
-      const saved = await AsyncStorage.getItem('vifani_bio_creds');
+      const saved = await getProtectedItem(BIOMETRIC_CREDENTIALS_KEY);
       const credentials = saved ? JSON.parse(saved) : null;
       if (typeof credentials?.savedPhone !== 'string' || typeof credentials?.savedPin !== 'string') {
         setHasSavedBiometrics(false);
@@ -148,7 +148,7 @@ export default function LoginScreen() {
       }
 
       await signIn(data?.token, data?.user, data?.activeGroup, data?.activeRole, data?.memberships, true);
-      void AsyncStorage.setItem('vifani_bio_creds', JSON.stringify({ savedPhone: cleanPhone, savedPin: cleanPin })).catch(() => {});
+      void setProtectedItem(BIOMETRIC_CREDENTIALS_KEY, JSON.stringify({ savedPhone: cleanPhone, savedPin: cleanPin })).catch(() => {});
     } catch (error) {
       let message = 'Majibu ya kuingia hayakuweza kutumika kwenye simu hii.';
       if (isAxiosError(error)) {
@@ -199,7 +199,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const res = await apiClient.post('/auth/reset-pin', { phone, otp, newPin });
-      await AsyncStorage.removeItem('vifani_bio_creds').catch(() => {});
+      await removeProtectedItem(BIOMETRIC_CREDENTIALS_KEY).catch(() => {});
       setHasSavedBiometrics(false);
       Alert.alert('Imefanikiwa', res.data?.message);
       setOtp('');

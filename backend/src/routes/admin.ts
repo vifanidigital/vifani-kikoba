@@ -175,4 +175,12 @@ router.use((error: unknown, _req: unknown, res: import('express').Response, _nex
   res.status(500).json({ error: 'Seva imeshindwa kupakia taarifa. Jaribu tena.' });
 });
 
+router.get('/account-deletion-requests', async (_req, res) => {
+  const requests = await prisma.accountDeletionRequest.findMany({
+    orderBy: { createdAt: 'asc' }, take: 100,
+    select: { userId: true, createdAt: true, user: { select: { fullName: true, phone: true } } },
+  });
+  res.json({ requests });
+});
+
 export default router;

@@ -181,6 +181,8 @@ router.put('/settings', authenticateToken, async (req: AuthRequest, res: Respons
     }
 
     const b = req.body;
+    const loanMultiplier = z.coerce.number().min(1).max(10).optional().safeParse(b.loanLimitMultiplier);
+    if (!loanMultiplier.success) return res.status(400).json({ error: 'Weka kizidishi cha hisa kati ya 1 na 10, mfano 1.5.' });
     if (b.mandatoryPapoAmount !== undefined && (!Number.isFinite(Number(b.mandatoryPapoAmount)) || Number(b.mandatoryPapoAmount) < 0)) {
       return res.status(400).json({ error: 'Weka kiwango halali cha Papo ya lazima.' });
     }
@@ -203,7 +205,7 @@ router.put('/settings', authenticateToken, async (req: AuthRequest, res: Respons
       maxTopUpPapoCap: b.maxTopUpPapoCap !== undefined ? Number(b.maxTopUpPapoCap) : undefined,
       topUpPapoWeeks: b.topUpPapoWeeks !== undefined ? Number(b.topUpPapoWeeks) : undefined,
       interestRate: b.interestRate !== undefined ? Number(b.interestRate) : undefined,
-      loanLimitMultiplier: b.loanLimitMultiplier !== undefined ? Number(b.loanLimitMultiplier) : undefined,
+      loanLimitMultiplier: loanMultiplier.data,
       maxBigLoanCap: b.maxBigLoanCap !== undefined ? Number(b.maxBigLoanCap) : undefined,
       maxRepaymentMonths: b.maxRepaymentMonths !== undefined ? Number(b.maxRepaymentMonths) : undefined,
       requireGuarantor: b.requireGuarantor !== undefined ? Boolean(b.requireGuarantor) : undefined,

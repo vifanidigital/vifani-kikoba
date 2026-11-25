@@ -452,9 +452,9 @@ export default function ChairmanSettingsScreen({ navigation }: any) {
               <Text className={`text-xs font-semibold mb-1 ${textSub}`}>Mara Ngapi ya Hisa</Text>
               <FormTextInput
                 className={`border rounded-xl p-3 font-bold ${inputClass}`}
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 value={loanMultiplier}
-                onChangeText={(t) => setLoanMultiplier(num(t))}
+                onChangeText={(t) => setLoanMultiplier(t.replace(',', '.').replace(/[^0-9.]/g, ''))}
               />
             </View>
             <View className="flex-1">

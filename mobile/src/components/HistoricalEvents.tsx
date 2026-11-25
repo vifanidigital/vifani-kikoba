@@ -36,6 +36,23 @@ export default function HistoricalEvents({ date, members, hasPapo, refresh }: {
   const [includeSecond, setIncludeSecond] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [correction, setCorrection] = useState<{ id: string; date: string; amount: string; includeSecond?: boolean; issued: boolean } | null>(null);
+  const correct = async () => {
+    if (busy || !correction || !correction.amount.trim()) return;
+    setBusy(true); setMessage('');
+    try {
+      const { data: response } = await apiClient.put(path + '/' + encodeURIComponent(correction.id), {
+        date: correction.date, amount: Number(correction.amount.replace(',', '.')), includeSecond: correction.includeSecond,
+      });
+      setCorrection(null);
+      setMessage(response.message);
+      setData((await apiClient.get<Data>(path)).data);
+      await refresh();
+    } catch (error) {
+      const detail = isAxiosError(error) ? error.response?.data?.error : undefined;
+      setMessage(typeof detail === 'string' ? detail : 'Imeshindikana kusahihisha tukio.');
+    } finally { setBusy(false); }
+  };
   useEffect(() => {
     let active = true;
     apiClient.get<Data>(path).then(res => { if (active) setData(res.data); })
@@ -94,8 +111,31 @@ export default function HistoricalEvents({ date, members, hasPapo, refresh }: {
       </Pressable>
     </View>}
     {message ? <Text accessibilityRole="alert" className="mt-2 text-white">{message}</Text> : null}
-    {data?.events.map(row => <Text key={row.id} className="mt-2 text-slate-200">
-      {members.find(member => member.userId === row.userId)?.fullName ?? 'Mwanachama'} · {labels[row.type] ?? row.type} · TZS {row.amount.toLocaleString()}{row.notes ? ' · ' + row.notes : ''}
-    </Text>)}
+    {data?.events.map(row => (
+      <View key={row.id} className="mt-2 border-t border-slate-700 pt-2">
+        <Text className="text-slate-200">
+          {members.find(member => member.userId === row.userId)?.fullName ?? 'Mwanachama'} · {labels[row.type] ?? row.type} · TZS {row.amount.toLocaleString()}{row.notes ? ' · ' + row.notes : ''}
+        </Text>
+        {/^[a-f0-9]{64}$/.test(row.id) && ['LOAN_DISBURSEMENT', 'LOAN_REPAYMENT', 'LOAN_INTEREST_REPAYMENT'].includes(row.type) && (
+          correction?.id === row.id ? <View className="mt-2 gap-2">
+            <FormTextInput accessibilityLabel="Tarehe ya tukio la mkopo" placeholder="YYYY-MM-DD" value={correction.date}
+              onChangeText={value => {
+                const digits = value.replace(/[^0-9]/g, '').slice(0, 8);
+                setCorrection({ ...correction, date: [digits.slice(0, 4), digits.slice(4, 6), digits.slice(6)].filter(Boolean).join('-') });
+              }} keyboardType="number-pad" className={input} />
+            <FormTextInput accessibilityLabel="Kiasi cha mtaji" placeholder="Kiasi cha mtaji" value={correction.amount} onChangeText={amount => setCorrection({ ...correction, amount })} keyboardType="decimal-pad" className={input} />
+            {!correction.issued && chip('correct-second', correction.includeSecond === undefined ? 'Riba ya pili: kama ilivyorekodiwa' : correction.includeSecond ? 'Riba ya pili: jumuisha' : 'Riba ya pili: usijumuishe', correction.includeSecond === true, () => setCorrection({ ...correction, includeSecond: correction.includeSecond === undefined ? true : correction.includeSecond ? false : undefined }))}
+            <View className="flex-row flex-wrap gap-2">
+              {chip('save-correction', 'Hifadhi marekebisho', true, () => void correct())}
+              {chip('cancel-correction', 'Ghairi', false, () => setCorrection(null))}
+            </View>
+          </View> : <Pressable accessibilityRole="button" disabled={busy} className="mt-1 self-start py-2" onPress={() => setCorrection({
+            id: row.id, date, amount: String(row.type === 'LOAN_INTEREST_REPAYMENT' ? 0 : row.amount),
+            issued: row.type === 'LOAN_DISBURSEMENT',
+          })}><Text className="font-bold text-teal-300">Sahihisha tukio la mkopo</Text></Pressable>
+        )}
+      </View>
+    ))}
+
   </View>;
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "Group" ALTER COLUMN "loanLimitMultiplier" TYPE DOUBLE PRECISION;

@@ -1,3 +1,4 @@
+import { meetingDateKey } from '../utils/meetingDate';
 import { byMemberName } from '../utils/byMemberName';
 import MeetingLookup from '../components/MeetingLookup';
 import HistoricalMeetings from '../components/HistoricalMeetings';
@@ -672,17 +673,12 @@ export default function KikaoAkibaScreen() {
             const myPapoTxs = Array.isArray(myHistory?.papoInterestTxs) ? myHistory.papoInterestTxs : [];
             const totalPapoPaid = myPapoTxs.reduce((s: number, tx: any) => s + Number(tx.amount || 0), 0);
 
-            const safeDateKey = (raw: any) => {
-              const d = new Date(raw);
-              return isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
-            };
-
             const dateKeys = new Set<string>();
-            mySharesList.forEach((s: any) => dateKeys.add(safeDateKey(s.meetingDate)));
-            myPapoTxs.forEach((tx: any) => dateKeys.add(safeDateKey(tx.createdAt)));
-            myFinesList.forEach((f: any) => dateKeys.add(safeDateKey(f.createdAt)));
+            mySharesList.forEach((s: any) => dateKeys.add(meetingDateKey(s.meetingDate)));
+            myPapoTxs.forEach((tx: any) => dateKeys.add(meetingDateKey(tx.createdAt)));
+            myFinesList.forEach((f: any) => dateKeys.add(meetingDateKey(f.createdAt)));
 
-            const sortedDates = Array.from(dateKeys).sort((a, b) => (a < b ? 1 : -1));
+            const sortedDates = Array.from(dateKeys).filter(Boolean).sort((a, b) => (a < b ? 1 : -1));
 
             return (
               <>
@@ -729,9 +725,9 @@ export default function KikaoAkibaScreen() {
                   </View>
                 ) : (
                   sortedDates.map((dKey) => {
-                    const dayShares = mySharesList.filter((s: any) => safeDateKey(s.meetingDate) === dKey);
-                    const dayPapo = myPapoTxs.filter((tx: any) => safeDateKey(tx.createdAt) === dKey);
-                    const dayFines = myFinesList.filter((f: any) => safeDateKey(f.createdAt) === dKey);
+                    const dayShares = mySharesList.filter((s: any) => meetingDateKey(s.meetingDate) === dKey);
+                    const dayPapo = myPapoTxs.filter((tx: any) => meetingDateKey(tx.createdAt) === dKey);
+                    const dayFines = myFinesList.filter((f: any) => meetingDateKey(f.createdAt) === dKey);
 
                     const sCount = dayShares.reduce((sum: number, s: any) => sum + Number(s.sharesCount || 0), 0);
                     const sAmt = dayShares.reduce((sum: number, s: any) => sum + Number(s.amountPaid || 0), 0);
@@ -745,7 +741,7 @@ export default function KikaoAkibaScreen() {
                           <View className="flex-row items-center gap-1.5">
                             <Ionicons name="calendar-outline" size={15} color="#0f766e" />
                             <Text className={`font-extrabold text-xs ${textMain}`}>
-                              Kikao cha {new Date(dKey).toLocaleDateString('sw-TZ')}
+                              Kikao cha {new Date(dKey + 'T12:00:00+03:00').toLocaleDateString('sw-TZ', { timeZone: 'Africa/Dar_es_Salaam' })}
                             </Text>
                           </View>
                           <View className="bg-teal-600/15 px-2.5 py-0.5 rounded-lg">

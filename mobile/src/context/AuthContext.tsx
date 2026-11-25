@@ -1,6 +1,8 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiClient, SESSION_TOKEN_KEY } from '../api/client';
+import { apiClient } from '../api/client';
+import { clearCachedData } from '../utils/cache';
+import { clearLegacySensitiveStorage, getProtectedItem, setProtectedItem, removeProtectedItem, SESSION_TOKEN_KEY } from '../utils/protectedStorage';
 
 export interface Group {
   id: string;
@@ -65,8 +67,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const loadSession = async () => {
       try {
+        await clearLegacySensitiveStorage().catch(() => {});
         const [savedToken, savedUser, savedGroup, savedRole, savedMemberships] = await Promise.all([
-          AsyncStorage.getItem(SESSION_TOKEN_KEY),
+          getProtectedItem(SESSION_TOKEN_KEY),
           AsyncStorage.getItem('vifani_user'),
           AsyncStorage.getItem('vifani_group'),
           AsyncStorage.getItem('vifani_role'),
@@ -106,12 +109,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     try {
       await AsyncStorage.multiSet([
-        [SESSION_TOKEN_KEY, newToken],
         ['vifani_user', JSON.stringify(newUser)],
         ['vifani_group', JSON.stringify(activeGroup)],
         ['vifani_role', activeRole],
         ['vifani_memberships', JSON.stringify(userMemberships)],
       ]);
+      await setProtectedItem(SESSION_TOKEN_KEY, newToken);
     } catch {
       throw new Error('Akaunti imethibitishwa, lakini simu imeshindwa kuhifadhi kipindi cha kuingia.');
     }
@@ -141,10 +144,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     await AsyncStorage.multiSet([
-      [SESSION_TOKEN_KEY, newToken],
       ['vifani_group', JSON.stringify(activeGroup)],
       ['vifani_role', activeRole],
     ]);
+    await setProtectedItem(SESSION_TOKEN_KEY, newToken);
 
     setToken(newToken);
     setGroup(activeGroup);
@@ -153,8 +156,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    await removeProtectedItem(SESSION_TOKEN_KEY);
+    clearCachedData();
     await AsyncStorage.multiRemove([
-      SESSION_TOKEN_KEY,
       'vifani_user',
       'vifani_group',
       'vifani_role',

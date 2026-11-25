@@ -1,20 +1,22 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const CACHE_PREFIX = 'vifani_cache_v1_';
+const cache = new Map<string, string>();
+const MAX_ENTRIES = 100;
 
 export async function getCachedData<T>(key: string): Promise<T | null> {
-  try {
-    const raw = await AsyncStorage.getItem(CACHE_PREFIX + key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
+  const raw = cache.get(key);
+  return raw ? JSON.parse(raw) as T : null;
 }
 
-export async function setCachedData(key: string, data: any): Promise<void> {
-  try {
-    await AsyncStorage.setItem(CACHE_PREFIX + key, JSON.stringify(data));
-  } catch {
-    // Puuza kama hifadhi imejaa
+export async function setCachedData(key: string, data: unknown): Promise<void> {
+  const encoded = JSON.stringify(data);
+  if (encoded === undefined) return;
+  cache.delete(key);
+  if (cache.size >= MAX_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest) cache.delete(oldest);
   }
+  cache.set(key, encoded);
+}
+
+export function clearCachedData() {
+  cache.clear();
 }

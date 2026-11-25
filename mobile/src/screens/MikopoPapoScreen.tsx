@@ -593,6 +593,10 @@ export default function MikopoPapoScreen() {
           {activeTab === 'LOANS' && (
             <View className="mb-4">
               <Text className={'mb-2 font-bold ' + textMain}>Historia ya Riba Iliyolipwa</Text>
+              <View className={`mb-3 rounded-xl border p-3 ${cardClass}`}>
+                <Text className={textMain}>Riba yako iliyolipwa kwa wakati · TZS {Number(loansData?.myInterestProfit ?? 0).toLocaleString()}</Text>
+                <Text className={textSub}>Riba ya kikundi iliyocheleweshwa · TZS {Number(loansData?.groupLateInterest ?? 0).toLocaleString()}</Text>
+              </View>
               {!loans.data?.interestPayments?.length && (
                 <Text className={'mb-2 text-sm ' + textSub}>Hakuna rekodi za malipo ya riba zilizoletwa.</Text>
               )}

@@ -20,9 +20,10 @@ type Member = {
   userId: string;
   fullName: string;
   isActive?: boolean;
-  record: { sharesCount: number; amountPaid: number; socialFundPaid: number } | null;
+  record: { id: string; sharesCount: number; amountPaid: number; socialFundPaid: number; papoInterestPaid: number } | null;
 };
-type Session = { members: Member[]; hasPapo: boolean };
+type Fine = { id: string; userId: string; reason: string; amount: number; isPaid: boolean };
+type Session = { members: Member[]; hasPapo: boolean; fines?: Fine[] };
 const days = ['Jumapili', 'Jumatatu', 'Jumanne', 'Jumatano', 'Alhamisi', 'Ijumaa', 'Jumamosi'];
 const fields = [
   ['sharesCount', 'Idadi ya hisa'],
@@ -50,6 +51,7 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
   const [session, setSession] = useState<Session | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
   const [draft, setDraft] = useState(empty);
+  const [fineDraft, setFineDraft] = useState<(Omit<Fine, 'amount'> & { amount: string }) | null>(null);
   const [limit, setLimit] = useState(8);
   const [showCompleted, setShowCompleted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -92,6 +94,7 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
   });
 
   const chooseDate = (date: string) => void request(async () => {
+    setFineDraft(null);
     setPicked(date);
     setSession(null);
     setMemberId(null);
@@ -111,14 +114,16 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
       return;
     }
     void request(async () => {
-      await apiClient.post('/shares/historical-meetings/' + picked, { targetUserId: memberId, ...amounts });
-      setSession(previous => previous && ({
-        ...previous,
-        members: previous.members.map(member => member.userId === memberId ? {
-          ...member,
-          record: { sharesCount: amounts.sharesCount, amountPaid: amounts.amountPaid, socialFundPaid: amounts.socialFundPaid },
-        } : member),
-      }));
+      const record = session?.members.find(member => member.userId === memberId)?.record;
+      const path = '/shares/historical-meetings/' + picked;
+      if (record) {
+        const { sharesCount, amountPaid, socialFundPaid, papoInterestPaid } = amounts;
+        await apiClient.put(path + '/record', { recordId: record.id, targetUserId: memberId, sharesCount, amountPaid, socialFundPaid, papoInterestPaid });
+      } else {
+        await apiClient.post(path, { targetUserId: memberId, ...amounts });
+      }
+      const { data: updated } = await apiClient.get<Session>(path);
+      setSession(updated);
       setMemberId(null);
       setDraft(empty);
       setMessage('Rekodi imehifadhiwa kwa tarehe ' + picked + '.');
@@ -189,11 +194,18 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
               {byMemberName(session.members, member => member.fullName).map(member => (
                 <View key={member.userId} className="mb-2 rounded-xl border border-slate-400 p-3">
                   <Text className={'font-bold ' + textColor}>{member.fullName}{member.isActive === false ? ' (si hai)' : ''}</Text>
-                  {member.record ? (
+                  {memberId !== member.userId && member.record ? (
+                    <View>
                     <Text className={'mt-1 text-sm ' + textColor}>Imehifadhiwa · Hisa {member.record.sharesCount} · Hisa TZS {member.record.amountPaid.toLocaleString()} · Jamii TZS {member.record.socialFundPaid.toLocaleString()}</Text>
+                    <Pressable accessibilityRole="button" disabled={loading} className="self-start rounded-lg bg-teal-800 px-3 py-2 mt-2" onPress={() => {
+                      const row = member.record!;
+                      setMemberId(member.userId);
+                      setDraft({ ...empty, sharesCount: String(row.sharesCount), amountPaid: String(row.amountPaid), socialFundPaid: String(row.socialFundPaid), papoInterestPaid: String(row.papoInterestPaid ?? 0) });
+                    }}><Text className="font-bold text-white">Hariri rekodi</Text></Pressable>
+                    </View>
                   ) : memberId === member.userId ? (
                     <>
-                      {fields.filter(([key]) => key !== 'papoInterestPaid' || session.hasPapo).map(([key, label]) => (
+                      {fields.filter(([key]) => (key !== 'papoInterestPaid' || session.hasPapo) && (!member.record || (key !== 'paidFine' && key !== 'unpaidFine'))).map(([key, label]) => (
                         <View key={key} className="mt-2">
                           <Text className={'text-xs ' + textColor}>{label}</Text>
                           <FormTextInput accessibilityLabel={label} keyboardType="decimal-pad" value={draft[key]} editable={!loading} onChangeText={value => setDraft(previous => ({ ...previous, [key]: value }))} className={'rounded-lg border border-slate-400 p-2 ' + textColor} />
@@ -204,6 +216,33 @@ export default function HistoricalMeetings({ refresh }: { refresh: () => Promise
                   ) : (
                     <Pressable accessibilityRole="button" disabled={loading} onPress={() => { setMemberId(member.userId); setDraft(empty); setError(''); }} className="self-start py-2"><Text className={textColor}>Jaza Rekodi</Text></Pressable>
                   )}
+                  {session.fines?.filter(fine => fine.userId === member.userId).map(fine => (
+                    <View key={fine.id} className="mt-3 border-t border-slate-400 pt-2">
+                      <Text className={textColor}>{fine.reason} · TZS {fine.amount.toLocaleString()} · {fine.isPaid ? 'Imelipwa' : 'Haijalipwa'}</Text>
+                      <Pressable disabled={loading} onPress={() => setFineDraft({ ...fine, amount: String(fine.amount) })} className="py-2">
+                        <Text className={textColor}>Hariri faini</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                  {fineDraft?.userId === member.userId ? <>
+                    <FormTextInput accessibilityLabel="Sababu ya faini" placeholder="Sababu ya faini" value={fineDraft.reason} onChangeText={reason => setFineDraft({ ...fineDraft, reason })} className={'rounded-lg border border-slate-400 p-2 ' + textColor} />
+                    <FormTextInput accessibilityLabel="Kiasi cha faini" placeholder="Kiasi cha faini" value={fineDraft.amount} keyboardType="decimal-pad" onChangeText={amount => setFineDraft({ ...fineDraft, amount })} className={'rounded-lg border border-slate-400 p-2 ' + textColor} />
+                    <Pressable onPress={() => setFineDraft({ ...fineDraft, isPaid: !fineDraft.isPaid })} className="py-2"><Text className={textColor}>{fineDraft.isPaid ? 'Imelipwa' : 'Haijalipwa'} · Badili hali</Text></Pressable>
+                    <View className="flex-row gap-3">
+                      <Pressable disabled={loading} className="self-start rounded-lg bg-teal-800 px-3 py-2" onPress={() => void request(async () => {
+                        const path = '/shares/historical-meetings/' + picked;
+                        const { id, userId, reason, amount, isPaid } = fineDraft;
+                        const payload = { reason, amount: Number(amount.replace(',', '.')), isPaid };
+                        const response = id ? await apiClient.put(path + '/fines/' + id, payload) : await apiClient.post(path + '/fines', { ...payload, userId });
+                        setFineDraft(null);
+                        setMessage(response.data.message);
+                        setSession((await apiClient.get<Session>(path)).data);
+                      })}><Text className="font-bold text-white">Hifadhi faini</Text></Pressable>
+                      <Pressable disabled={loading} onPress={() => setFineDraft(null)} className="p-2"><Text className={textColor}>Ghairi</Text></Pressable>
+                    </View>
+                  </> : <Pressable disabled={loading} onPress={() => setFineDraft({ id: '', userId: member.userId, reason: '', amount: '', isPaid: false })} className="mt-2 self-start rounded-lg border border-slate-400 p-2">
+                    <Text className={'font-bold ' + textColor}>Ongeza faini</Text>
+                  </Pressable>}
                 </View>
               ))}
               {session.members.length === 0 && <Text className={textColor}>Hakuna wanachama hai wa kuingiziwa rekodi.</Text>}

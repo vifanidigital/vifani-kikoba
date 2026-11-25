@@ -96,8 +96,53 @@ export async function saveHistoricalEvent(tx: Prisma.TransactionClient, groupId:
     const fine = await tx.fineRecord.findFirst({ where: { id: debtId ?? '', groupId, userId, createdAt: { lte: date }, isPaid: false } });
     if (!fine || fine.amount !== amount) throw new HistoricalConflict('Chagua faini na tumia kiasi chake kamili.');
     await tx.fineRecord.update({ where: { id: fine.id }, data: { isPaid: true, paidAt: date } });
-    await ledger('HISTORICAL_FINE', amount);
+    await ledger('HISTORICAL_FINE', amount, fine.id);
   } else {
     await ledger('PAPO_INTEREST', amount);
   }
+}
+
+export async function correctHistoricalLoan(tx: Prisma.TransactionClient, groupId: string, editor: string, id: string, before: Date, after: Date, amount: number, includeSecond?: boolean) {
+  if (!/^[a-f0-9]{64}$/.test(id)) throw new HistoricalConflict('Tukio hili halikurekodiwa kupitia daftari la nyuma.');
+  const ledger = await tx.transaction.findFirst({ where: { id, groupId, createdAt: { gte: before, lt: meetingDayEnd(before) },
+    type: { in: ['LOAN_DISBURSEMENT', 'LOAN_REPAYMENT', 'LOAN_INTEREST_REPAYMENT'] } } });
+  if (!ledger?.interestLoanId || !ledger.notes) throw new HistoricalConflict('Tukio la mkopo halijapatikana.');
+  const loan = await tx.loan.findFirst({ where: { id: ledger.interestLoanId, groupId, userId: ledger.userId } });
+  if (!loan?.disbursedAt || !loan.repaymentPlan) throw new HistoricalConflict('Rekodi hii ya zamani haiwezi kusahihishwa kupitia fomu hii.');
+  const plan = loan.repaymentPlan as RepaymentPlan;
+  if (loan.status === 'REPAYMENT_PENDING') throw new HistoricalConflict('Malizia ombi linalosubiri kabla ya kusahihisha rekodi.');
+  if (ledger.type === 'LOAN_DISBURSEMENT') {
+    if (amount <= 0) throw new HistoricalConflict('Kiasi cha mkopo lazima kiwe zaidi ya sifuri.');
+    if (loan.amountPaid > 0 || plan.history?.length || plan.latest) throw new HistoricalConflict('Mkopo wenye marejesho unahitaji uhakiki wa daftari kabla ya kubadili kiasi au tarehe ya kutolewa.');
+    await tx.loan.update({ where: { id: loan.id }, data: {
+      createdAt: after, disbursedAt: after, dueDate: calendarLoanDue(after, 2), nextInterestDue: calendarLoanDue(after, 1),
+      principalAmount: amount, fundedAmount: amount, totalRepayable: Math.round(amount * 110) / 100,
+    } });
+    const newId = createHash('sha256').update(JSON.stringify([groupId, after.toISOString(), ledger.notes.toLowerCase()])).digest('hex');
+    if (newId !== id && await tx.transaction.findUnique({ where: { id: newId } })) throw new HistoricalConflict('Rejea tayari inatumika kwenye tarehe hiyo.');
+    await tx.transaction.update({ where: { id }, data: { id: newId, amount, createdAt: after } });
+  } else {
+    const history = plan.history ?? [];
+    const latest = history.at(-1);
+    if (latest?.id !== id || latest.status !== 'APPROVED') throw new HistoricalConflict('Marekebisho yanaruhusiwa kwa marejesho ya mwisho ili kulinda hesabu za malipo yanayofuata.');
+    const restored: RepaymentPlan = {
+      ...plan, history: history.slice(0, -1), principalPaid: Math.round((plan.principalPaid - latest.principal) * 100) / 100,
+      firstPaid: plan.firstPaid && !latest.first, secondPaid: plan.secondPaid && !latest.second,
+    };
+    const previousAmount = Math.round((loan.amountPaid - latest.principal - latest.first - latest.second) * 100) / 100;
+    const quote = repaymentQuote(loan.principalAmount, restored, loan.disbursedAt, after);
+    await tx.loan.update({ where: { id: loan.id }, data: {
+      status: 'DISBURSED', repaymentPlan: restored, amountPaid: previousAmount,
+      totalRepayable: previousAmount + quote.dueBalance,
+    } });
+    await tx.transaction.deleteMany({ where: {
+      groupId, userId: loan.userId, interestLoanId: loan.id, createdAt: ledger.createdAt, notes: ledger.notes,
+      type: { in: ['LOAN_REPAYMENT', 'LOAN_INTEREST_REPAYMENT'] },
+    } });
+    const originalReference = ledger.notes;
+    await saveHistoricalEvent(tx, groupId, after, { kind: 'LOAN_IN', userId: loan.userId, debtId: loan.id, amount, reference: originalReference, includeSecond: includeSecond ?? latest.second > 0 });
+  }
+  await tx.transaction.create({ data: { groupId, userId: loan.userId, type: 'HISTORICAL_LOAN_EDIT', amount: 0,
+    notes: JSON.stringify({ editor, eventId: id, loanId: loan.id, before: { date: before.toISOString(), amount: ledger.amount },
+      after: { date: after.toISOString(), principal: amount } }) } });
 }

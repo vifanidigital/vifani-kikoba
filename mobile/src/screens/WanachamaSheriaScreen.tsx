@@ -748,10 +748,10 @@ export default function WanachamaSheriaScreen() {
                       <View className="flex-1">
                         <Text className={`text-xs font-bold ${textSub}`}>Mara ya Hisa (Mkopo):</Text>
                         <FormTextInput
-                          keyboardType="numeric"
+                          keyboardType="decimal-pad"
                           className={`border rounded-xl p-2.5 text-xs font-bold ${inputClass}`}
                           value={String(rulesForm.loanLimitMultiplier ?? '')}
-                          onChangeText={(t) => setRulesForm({ ...rulesForm, loanLimitMultiplier: t.replace(/[^0-9.]/g, '') })}
+                          onChangeText={(t) => setRulesForm({ ...rulesForm, loanLimitMultiplier: t.replace(',', '.').replace(/[^0-9.]/g, '') })}
                         />
                       </View>
                       <View className="flex-1">

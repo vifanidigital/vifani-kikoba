@@ -1,3 +1,5 @@
+import { clearCachedData } from '../utils/cache';
+import { BIOMETRIC_CREDENTIALS_KEY, getProtectedItem, setProtectedItem, removeProtectedItem } from '../utils/protectedStorage';
 import { FormTextInput, FormScrollView } from '../components/KeyboardForm';
 import { useUserPreference } from '../utils/useUserPreference';
 import { router } from 'expo-router';
@@ -21,7 +23,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { apiClient } from '../api/client';
+import { API_URL, apiClient } from '../api/client';
 
 const WEAK_PINS = ['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '12345', '123456', '000000'];
 
@@ -56,7 +58,7 @@ export default function UserSettingsScreen() {
       const enrolled = await LocalAuthentication.isEnrolledAsync();
       setBiometricSupported(compatible && enrolled);
 
-      const savedBio = await AsyncStorage.getItem('vifani_bio_creds');
+      const savedBio = await getProtectedItem(BIOMETRIC_CREDENTIALS_KEY);
       setBiometricEnabled(Boolean(savedBio));
 
 
@@ -83,7 +85,7 @@ export default function UserSettingsScreen() {
     }
 
     if (!val) {
-      await AsyncStorage.removeItem('vifani_bio_creds');
+      await removeProtectedItem(BIOMETRIC_CREDENTIALS_KEY);
       setBiometricEnabled(false);
       Alert.alert('Imezimwa', 'Kuingia kwa alama ya kidole kumezimwa kwenye simu hii.');
       return;
@@ -138,10 +140,10 @@ export default function UserSettingsScreen() {
     setSavingPin(true);
     try {
       const res = await apiClient.post('/auth/change-pin', { oldPin, newPin });
-      const savedBio = await AsyncStorage.getItem('vifani_bio_creds');
+      const savedBio = await getProtectedItem(BIOMETRIC_CREDENTIALS_KEY);
       if (savedBio && user?.phone) {
-        await AsyncStorage.setItem(
-          'vifani_bio_creds',
+        await setProtectedItem(
+          BIOMETRIC_CREDENTIALS_KEY,
           JSON.stringify({ savedPhone: user.phone, savedPin: newPin })
         );
       }
@@ -158,6 +160,7 @@ export default function UserSettingsScreen() {
 
   const handleClearCache = async () => {
     try {
+      clearCachedData();
       const allKeys = await AsyncStorage.getAllKeys();
       const cacheKeys = allKeys.filter(
         (k) =>
@@ -467,6 +470,10 @@ export default function UserSettingsScreen() {
             Vifani Jamii • Toleo la 1.0.0
           </Text>
         </Animated.View>
+        <TouchableOpacity accessibilityRole="button" className="my-4 self-start rounded-xl border border-rose-500 px-4 py-3"
+        onPress={() => void Linking.openURL(API_URL.replace(/\/api$/, '') + '/account-deletion').catch(() => Alert.alert('Hitilafu', 'Ukurasa wa ombi haujafunguka.'))}>
+        <Text className="font-bold text-rose-600">Omba kufuta akaunti</Text>
+      </TouchableOpacity>
       </FormScrollView>
     </KeyboardAvoidingView>
   );

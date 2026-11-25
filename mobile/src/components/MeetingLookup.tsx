@@ -1,6 +1,7 @@
 import { byMemberName } from '../utils/byMemberName';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { isAxiosError } from 'axios';
 import { apiClient } from '../api/client';
 import { useTheme } from '../context/ThemeContext';
@@ -47,9 +48,16 @@ export default function MeetingLookup() {
     } finally { setLoading(false); }
   };
   return <View className={'mb-4 rounded-2xl p-4 ' + (isDark ? 'bg-slate-900' : 'bg-white')}>
-    <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)}>
-      <Text className={'font-bold ' + color}>Tafuta kikao kwa tarehe au juma</Text>
-    </Pressable>
+    <View className="flex-row items-center justify-between gap-2">
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(true)} className="min-h-11 flex-1 flex-row items-center gap-2">
+        <View className="rounded-xl bg-teal-100 p-2"><Ionicons name="search-outline" size={19} color="#115e59" /></View>
+        <Text className={'flex-1 text-base font-extrabold ' + color}>Tafuta kikao</Text>
+      </Pressable>
+      {open && <Pressable accessibilityRole="button" onPress={() => setOpen(false)} className="min-h-11 flex-row items-center gap-1 rounded-xl border border-slate-400 px-3 py-2">
+        <Ionicons name="close-outline" size={17} color={isDark ? '#e2e8f0' : '#334155'} />
+        <Text className={color}>Funga</Text>
+      </Pressable>}
+    </View>
     {open && <>
       <View className="my-2 flex-row gap-2">
         {(['date', 'week'] as const).map(option => <Pressable key={option} accessibilityRole="button" accessibilityState={{ selected: option === mode }} disabled={loading}

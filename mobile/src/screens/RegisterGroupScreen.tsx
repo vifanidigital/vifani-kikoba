@@ -138,7 +138,7 @@ export default function RegisterGroupScreen() {
         contributionFreq,
         latePenalty: Number(latePenalty) || 0,
         socialFundAmount: Number(socialFundAmount) || 0,
-        loanLimitMultiplier: Math.max(1, Number(loanLimitMultiplier) || 3),
+        loanLimitMultiplier: Number(loanLimitMultiplier),
         hasPapo,
         mandatoryPapoAmount: hasPapo ? Number(mandatoryPapoAmount) : 0,
         papoMeetingInterest: hasPapo ? Number(papoMeetingInterest) : 0,
@@ -354,9 +354,9 @@ export default function RegisterGroupScreen() {
                   <Text className="text-[11px] font-bold text-slate-700 mb-1">Kiwango (Mara ya Hisa)</Text>
                   <FormTextInput
                     className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-900 font-bold"
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     value={loanLimitMultiplier}
-                    onChangeText={(t) => setLoanLimitMultiplier(onlyDigits(t))}
+                    onChangeText={(t) => setLoanLimitMultiplier(t.replace(',', '.').replace(/[^0-9.]/g, ''))}
                   />
                 </View>
                 <View className="flex-1">

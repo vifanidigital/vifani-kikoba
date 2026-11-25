@@ -54,11 +54,14 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       (l: any) => l.guarantorId === userId && l.guarantorStatus === 'PENDING' && l.status === 'PENDING'
     );
 
-    const payments = await prisma.transaction.findMany({
+    const [payments, groupLate] = await Promise.all([prisma.transaction.findMany({
       where: { groupId, type: 'LOAN_INTEREST_REPAYMENT', userId: LEADER_ROLES.includes(role) ? undefined : userId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { user: { select: { fullName: true } } },
-    });
+    }), prisma.transaction.aggregate({
+      where: { groupId, type: 'LOAN_INTEREST_REPAYMENT', interestDueAt: { not: null }, createdAt: { gt: prisma.transaction.fields.interestDueAt } },
+      _sum: { amount: true },
+    })]);
     const interestPayments = payments.map(payment => ({
       id: payment.id,
       userId: payment.userId,
@@ -78,6 +81,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       guarantorRepaidNotices: loans.filter(loan => loan.guarantorId === userId && loan.guarantorStatus === 'REPAID_NOTIFY')
         .map(loan => ({ id: loan.id, name: loan.user.fullName })),
       interestPayments,
+      groupLateInterest: groupLate._sum.amount ?? 0,
       effectiveMaxLoan,
       myInterestProfit: interestPayments
         .filter(payment => payment.userId === userId && payment.timing === 'ON_TIME')
